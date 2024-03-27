@@ -1,0 +1,11 @@
+OBJECTS = cbuffer.o ctcp.o async.o
+
+CFLAGS = -fPIC -I/usr/local/include 
+LDFLAGS = -shared -L/usr/local/lib -luv 
+
+.SUFFIXES: .cpp .o
+.cpp.o:
+	c++ ${CFLAGS} -c $<
+
+libasync.so: ${OBJECTS}
+	ld ${LDFLAGS} -o $@ ${OBJECTS} 
