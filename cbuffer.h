@@ -8,6 +8,7 @@ public:
   CBuffer();
   ~CBuffer();
   CBuffer *_pNext;
+  CBuffer *_pPrev;
 
 private:
   char *_pBuffer; //buffer本体
@@ -23,7 +24,7 @@ public:
   inline size_t getLength() const { return _nLength; }
   inline char *getDataEnd() const { return _pBuffer + _nLength; }
   // 返回剩余多少空间
-  inline size_t getBufferFree() const { return _nBuffer - _nLength; }
+  inline size_t getFreeLength() const { return _nBuffer - _nLength; }
 
 public:
   void add(const void *pData, const size_t nLength);
@@ -47,7 +48,7 @@ public:
   bool readLine(std::string &str,bool bPeek);
 public:
   //清除内容
-  inline void clear() throw() {_nLength = 0; }
+  inline void clear() {_nLength = 0; }
 
   size_t addBuffer(CBuffer *pBuffer) {
     return addBuffer(pBuffer, pBuffer->_nLength);

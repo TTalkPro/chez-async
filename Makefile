@@ -1,4 +1,4 @@
-OBJECTS = cbuffer.o
+OBJECTS = cbuffer.o ctcp.o async.o
 
 all: libasync.so
 clean:
