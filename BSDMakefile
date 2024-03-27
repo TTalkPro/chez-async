@@ -1,16 +1,16 @@
 OBJECTS = cbuffer.o ctcp.o async.o
 
 CFLAGS = -fPIC -I/usr/local/include 
-LDFLAGS = -shared -L/usr/local/lib -luv 
+LDFLAGS = -shared -L/lib -L/usr/local/lib -luv -lstdc++
 
 .SUFFIXES: .cpp .o
 .DEFAULT: libasync.so 
 	
 .cpp.o:
-	c++ ${CFLAGS} -c $<
+	clang++ ${CFLAGS} -c $<
 
 libasync.so: ${OBJECTS}
-	ld ${LDFLAGS} -o $@ ${OBJECTS}
+	clang++ ${LDFLAGS} ${OBJECTS} -o $@ 
 
 clean:
 	rm -f *.o ; rm -rf *.so
