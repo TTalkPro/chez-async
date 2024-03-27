@@ -4,7 +4,7 @@
     tcp-connect)
   (import
     (chezscheme)
-    (chez-async async))
+    (chez-async base))
 
   (define create-tcp-instance
     (foreign-procedure "createTcpInstance"

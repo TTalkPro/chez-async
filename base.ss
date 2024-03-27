@@ -1,4 +1,4 @@
-(library (chez-async async)
+(library (chez-async base)
   (export
     chez-async-loaded?
     chez-async-supported?)

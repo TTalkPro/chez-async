@@ -6,7 +6,7 @@
     stop-event-loop)
   (import
     (chezscheme)
-    (chez-async async))
+    (chez-async base))
 
   (define create-event-loop
     (foreign-procedure "createEventLoop"
