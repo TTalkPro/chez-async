@@ -4,8 +4,13 @@ CFLAGS = -fPIC -I/usr/local/include
 LDFLAGS = -shared -L/usr/local/lib -luv 
 
 .SUFFIXES: .cpp .o
+.DEFAULT: libasync.so 
+	
 .cpp.o:
 	c++ ${CFLAGS} -c $<
 
 libasync.so: ${OBJECTS}
-	ld ${LDFLAGS} -o $@ ${OBJECTS} 
+	ld ${LDFLAGS} -o $@ ${OBJECTS}
+
+clean:
+	rm -f *.o ; rm -rf *.so
