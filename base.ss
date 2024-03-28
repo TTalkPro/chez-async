@@ -8,7 +8,7 @@
 
   (define (chez-async-supported?)
     (case (machine-type)
-      [(ta6fb ta6le) #t]
+      [(ta6fb ta6ob ta6le tarm64ob) #t]
       [else #f]))
 
   (define (chez-async-loaded?)

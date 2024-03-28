@@ -11,7 +11,7 @@
         [(_ . args)
           #`(define lib
               #,(let loop ([arg (syntax->datum #'args)])
-                  (if (pair? arg)
+		  (if (pair? arg)
                     (begin
                       (let loop2 ([ext (get-dynamic-ext)])
                         (if (pair? ext)
@@ -24,7 +24,6 @@
 
   (define (create-status-callback p)
     (let ([code (foreign-callable p (void* int) void)])
-      (display code)
       (lock-object code)
       (foreign-callable-entry-point code)))
 

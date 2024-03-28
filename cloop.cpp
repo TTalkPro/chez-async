@@ -2,7 +2,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
-#include <stdexcept>
+#include <new>
 #include <uv.h>
 
 CLoop::CLoop() {
