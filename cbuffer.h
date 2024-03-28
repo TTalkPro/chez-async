@@ -25,7 +25,7 @@ public:
   inline char *getDataEnd() const { return _pBuffer + _nLength; }
   // 返回剩余多少空间
   inline size_t getFreeLength() const { return _nBuffer - _nLength; }
-
+  inline void increaseLength(size_t nLength) {_nLength  += nLength;}
 public:
   void add(const void *pData, const size_t nLength);
   // 将数据插入指定的位置

@@ -1,4 +1,4 @@
-OBJECTS = cbuffer.o ctcp.o async_loop.o async_tcp.o
+OBJECTS = cbuffer.o ctcp.o cloop.o chandler.o async_loop.o async_tcp.o
 CXXFLAGS = -fPIC
 LDFLAGS = -shared -luv -lstdc++
 

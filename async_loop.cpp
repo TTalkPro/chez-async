@@ -1,31 +1,37 @@
+#include "cloop.h"
+#include <cassert>
 #include <cstdlib>
+#include <exception>
 #include <uv.h>
 #ifdef __cplusplus
+
 extern "C" {
-  uv_loop_t* createEventLoop(){
-    uv_loop_t* _pInstance = (uv_loop_t*)malloc(sizeof(uv_loop_t));
-    if(NULL == _pInstance)
-      return NULL;
-    if(uv_loop_init(_pInstance)){
-      free(_pInstance);
-      return NULL;
-    }
-    return _pInstance;
-  }
-  bool closeEventLoop(uv_loop_t* pLoop){
-    if(uv_loop_close(pLoop)){
-      return false;
-    }
-    free(pLoop);
-    return true;
-  }
 
-  void runEventLoop(uv_loop_t* pLoop){
-    uv_run(pLoop,UV_RUN_DEFAULT);
+CLoop *createEventLoop() {
+  try {
+    return new CLoop();
+  } catch (std::bad_alloc &e) {
+    return NULL;
   }
+}
 
-  void stopEventLoop(uv_loop_t* pLoop){
-    uv_stop(pLoop);
+bool closeEventLoop(CLoop *pInstance) {
+  assert(NULL != pInstance);
+  if (pInstance->close()) {
+    return false;
   }
+  delete pInstance;
+  return true;
+}
+
+int runEventLoop(CLoop *pInstance) {
+  assert(NULL != pInstance);
+  return pInstance->run();
+}
+
+void stopEventLoop(CLoop *pInstance) {
+  assert(NULL != pInstance);
+  pInstance->stop();
+}
 }
 #endif
