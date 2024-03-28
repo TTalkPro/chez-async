@@ -8,15 +8,16 @@
 
 class CHandler {
 public:
- CHandler(CLoop * pLoop, int nType): _pLoop(pLoop), _nType(nType),_bInCallback(false) {}
- CHandler(CLoop *pLoop) : CHandler(pLoop, HANDLER_TYPE_UNKNOWN) {}
-  CHandler() : CHandler(NULL, HANDLER_TYPE_UNKNOWN) {}
+  CHandler();
+  CHandler(CLoop* pLoop);
+  CHandler(CLoop* pLoop, int nType);
   ~CHandler() {_pLoop = NULL;}
 
 private:
   CLoop *_pLoop;
   int _nType;
   bool _bInCallback;
+  bool _bStarted;
 
 protected:
   inline uv_loop_t* getUVLoop(){return _pLoop->theLoop();}
@@ -25,6 +26,9 @@ protected:
   inline void enterCallback() { _bInCallback = true; }
   inline void leaveCallback() { _bInCallback = false; }
   inline bool isInCallback() {return _bInCallback;}
+  inline void start(){_bStarted = true;}
+  inline void stop() {_bStarted = false;}
+  inline bool isStarted() {return _bStarted;}
   virtual void onAllocBuffer(uv_handle_t *handle, size_t suggested_size,
                              uv_buf_t *buf) = 0;
 
