@@ -33,7 +33,7 @@ private:
   uv_prepare_t _sPrepare;
   uv_check_t _sCheck;
   uv_idle_t _sIdle;
-  StatusCallback _aStatusFunc[6];
+  StatusCallback _aStatusFunc[7];
   SimpleCallback _aSimpleFunc[6];
   ContextCallback _aContextFunc[1];
 

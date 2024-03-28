@@ -1,6 +1,7 @@
 #include "cloop.h"
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include <uv.h>
 
@@ -11,6 +12,9 @@ CLoop::CLoop() {
     throw exception;
   }
   uv_loop_set_data(_pCtx, this);
+  memset(_aContextFunc, 0, sizeof(_aContextFunc));
+  memset(_aStatusFunc, 0, sizeof(_aStatusFunc));
+  memset(_aSimpleFunc, 0, sizeof(_aSimpleFunc));
 }
 
 CLoop::~CLoop() {

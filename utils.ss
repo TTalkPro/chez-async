@@ -1,5 +1,7 @@
 (library (chez-async utils)
-  (export load-librarys)
+  (export
+    load-librarys
+    create-status-callback)
   (import (chezscheme) (chez-async dyn))
 
   (define-syntax load-librarys
@@ -19,4 +21,11 @@
                             (loop2 (cdr ext))))
                         (loop (cdr arg))))
                     #'1)))])))
+
+  (define (create-status-callback p)
+    (let ([code (foreign-callable p (void* int) void)])
+      (display code)
+      (lock-object code)
+      (foreign-callable-entry-point code)))
+
   )

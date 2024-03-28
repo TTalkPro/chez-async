@@ -1,7 +1,7 @@
 #include "cloop.h"
 #include <cassert>
 #include <cstdlib>
-#include <exception>
+#include <new>
 #include <uv.h>
 #ifdef __cplusplus
 
@@ -33,5 +33,9 @@ void stopEventLoop(CLoop *pInstance) {
   assert(NULL != pInstance);
   pInstance->stop();
 }
+  void* registerStatusCallback(CLoop *pInstance,void*pFunc,int nFuncIdx){
+    assert(NULL != pInstance);
+    return pInstance->registerStatusCallback(pFunc,nFuncIdx);
+  }
 }
 #endif
