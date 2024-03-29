@@ -27,6 +27,8 @@ protected :
 
 void onAllocBuffer(uv_handle_t *handle, size_t suggested_size,
                                      uv_buf_t *buf);
+  void start();
+  void stop();
 
 public:
   inline uv_tcp_t *getContext() const { return _pCtx; }
@@ -46,7 +48,7 @@ public:
   bool doListen(char *pAddr, int nPort);
   bool doConnect(char *pAddr, int nPort);
   // void doRewrite();
-  // void doWrite(char* pData,size_t nLength);
-  // size_t doRead(char* pData,size_t nLength);
+  int doWrite(char* pData,size_t nLength);
+  size_t doRead(char* pData,size_t nLength);
   // bool doShutdown();
 };

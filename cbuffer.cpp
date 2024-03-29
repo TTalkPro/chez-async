@@ -10,7 +10,11 @@
 #define CBUFFER_BLOCK_MASK 0xFFFFFC00 // 将数据进行round操作，最大4G
 #define CBUFFER_MAX_SIZE 0xFFFFFFFF
 
-CBuffer::CBuffer() : _pNext(NULL), _pPrev(NULL),_pBuffer(NULL), _nBuffer(0), _nLength(0) {}
+CBuffer::CBuffer()
+    :_pBuffer(NULL), _nBuffer(0), _nLength(0) {
+  _pNext = this;
+  _pPrev = this;
+}
 
 CBuffer::~CBuffer() {
   if (_pBuffer)

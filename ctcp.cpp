@@ -1,4 +1,5 @@
 #include "ctcp.h"
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,9 +18,6 @@ CTcp::CTcp(CLoop *pLoop, uv_tcp_t *pCtx) :CHandler(pLoop, HANDLER_TYPE_TCP), _pC
     delete _pRBuffer;
     _pRBuffer = NULL;
     throw exception;
-  }else {
-    _pWBuffer->_pNext = _pWBuffer;
-    _pWBuffer->_pPrev = _pWBuffer;
   }
 }
 
@@ -72,7 +70,7 @@ void CTcp::onWrite(uv_write_t *req,int status){
       CBuffer* _current = _pWBuffer; //取队列头
       _pWBuffer = _current->_pNext; //将队列第二位升级为队列头
       _pWBuffer->_pPrev = _current->_pPrev;
-      _current->_pPrev->_pNext = _pWBuffer;//队列尾巴重新指向队列头
+      _pWBuffer->_pPrev->_pNext = _pWBuffer;//队列尾巴重新指向队列头
       delete _current;
     }else {
       //整个buffer写完了
@@ -150,4 +148,65 @@ bool CTcp::doConnect(char* pAddr,int nPort){
     return false;
   }
   return true;
+}
+
+void CTcp::start(){
+  if(isStarted()) return;
+  int r = uv_read_start((uv_stream_t *)_pCtx, CHandler::onAllocBufferCallback,
+                CTcp::onReadCallback);
+  if (r == UV_EINVAL) return;
+  CHandler::start();
+}
+
+void CTcp::stop(){
+  if(!isStarted()) return;
+  uv_read_stop((uv_stream_t*)_pCtx);
+  CHandler::stop();
+}
+
+size_t CTcp::doRead(char* pData,size_t nLength){
+  size_t nread = 0;
+  if(_pRBuffer->getLength() > 0){
+    nread = _pRBuffer->read(pData,nLength);
+  }
+  if(nread == 0 || nread < nLength){
+    start();
+  }
+
+  return nread;
+}
+
+int CTcp::doWrite(char* pData,size_t nLength){
+  if(_pWBuffer->getLength() == 0){
+    _pWBuffer->add(pData, nLength);
+    memset(&_sWriteReq,0,sizeof(uv_write_t));
+    uv_buf_t buffers [] = {
+      {.base = _pWBuffer->getData(), .len = nLength}
+    };
+    uv_write(&_sWriteReq, (uv_stream_t *)_pCtx, buffers, 1,
+             CTcp::onWriteCallback);
+    return 0;
+  }
+
+  CBuffer* _pBuffer = new CBuffer();
+  if(NULL == _pBuffer)
+    return -1;
+  uv_write_t* _pReq = (uv_write_t*)malloc(sizeof(uv_write_t));
+  if(NULL == _pReq){
+    delete _pBuffer;
+    return -1;
+  }
+
+  _pBuffer->add(pData,nLength);
+  _pBuffer->_pPrev = _pWBuffer->_pPrev;
+  _pBuffer->_pPrev->_pNext = _pBuffer;
+  _pBuffer->_pNext = _pWBuffer;
+  _pWBuffer->_pPrev = _pBuffer;
+
+  uv_buf_t buffers [] = {
+    {.base = _pBuffer->getData(),.len = nLength}
+  };
+  uv_write(_pReq, (uv_stream_t *)_pCtx, buffers, 1,
+           CTcp::onWriteCallback);
+  return 0;
 }

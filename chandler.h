@@ -18,7 +18,6 @@ private:
   int _nType;
   bool _bInCallback;
   bool _bStarted;
-
 protected:
   inline uv_loop_t* getUVLoop(){return _pLoop->theLoop();}
   inline CLoop* theLoop(){return _pLoop;}
@@ -26,8 +25,8 @@ protected:
   inline void enterCallback() { _bInCallback = true; }
   inline void leaveCallback() { _bInCallback = false; }
   inline bool isInCallback() {return _bInCallback;}
-  inline void start(){_bStarted = true;}
-  inline void stop() {_bStarted = false;}
+  virtual void start(){_bStarted = true;}
+  virtual void stop() {_bStarted = false;}
   inline bool isStarted() {return _bStarted;}
   virtual void onAllocBuffer(uv_handle_t *handle, size_t suggested_size,
                              uv_buf_t *buf) = 0;
