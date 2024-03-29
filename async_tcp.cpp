@@ -1,4 +1,5 @@
 #include "ctcp.h"
+#include <cstddef>
 #include <new>
 #include <uv.h>
 #ifdef __cplusplus
@@ -14,5 +15,11 @@ CTcp *createTcpInstance(CLoop *pLoop) {
 bool tcpConnect(CTcp *pInstance, char *pAddr, int nPort) {
   return pInstance->doConnect(pAddr, nPort);
 }
+  size_t tcpRead(CTcp* pInstance,char* pData,int nLength){
+    return pInstance->doRead(pData,nLength);
+  }
+  int tcpWrite(CTcp* pInstance,char* pData,int nLength){
+    return pInstance->doWrite(pData,nLength);
+  }
 }
 #endif
