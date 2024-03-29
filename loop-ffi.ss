@@ -1,4 +1,4 @@
-(library (chez-async loop)
+(library (chez-async loop-ffi)
   (export
     create-event-loop
     close-event-loop
@@ -44,23 +44,23 @@
   (define CALLBACK-ON-FS-EVENT 1)
 
 
-  (define create-event-loop
+  (define create-event-loop-ffi
     (foreign-procedure "createEventLoop"
       () void*))
 
-  (define close-event-loop
+  (define close-event-loop-ffi
     (foreign-procedure "closeEventLoop"
       (void*) boolean))
 
-  (define run-event-loop
+  (define run-event-loop-ffi
     (foreign-procedure "runEventLoop"
       (void*) int))
 
-  (define stop-event-loop
+  (define stop-event-loop-ffi
     (foreign-procedure "stopEventLoop"
       (void*) void))
 
-  (define register-status-callback
+  (define register-status-callback-ffi
     (foreign-procedure "registerStatusCallback"
       (void* void* int) void*))
 )
