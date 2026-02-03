@@ -28,43 +28,25 @@
     %ffi-uv-idle-size
     )
   (import (chezscheme)
-          (chez-async ffi types))
+          (chez-async ffi types)
+          (chez-async internal macros))
 
   ;; ========================================
   ;; 句柄通用操作
   ;; ========================================
 
-  ;; void uv_close(uv_handle_t* handle, uv_close_cb close_cb)
-  (define %ffi-uv-close
-    (foreign-procedure "uv_close" (void* void*) void))
-
-  ;; void uv_ref(uv_handle_t* handle)
-  (define %ffi-uv-ref
-    (foreign-procedure "uv_ref" (void*) void))
-
-  ;; void uv_unref(uv_handle_t* handle)
-  (define %ffi-uv-unref
-    (foreign-procedure "uv_unref" (void*) void))
-
-  ;; int uv_has_ref(const uv_handle_t* handle)
-  (define %ffi-uv-has-ref
-    (foreign-procedure "uv_has_ref" (void*) int))
-
-  ;; int uv_is_active(const uv_handle_t* handle)
-  (define %ffi-uv-is-active
-    (foreign-procedure "uv_is_active" (void*) int))
-
-  ;; int uv_is_closing(const uv_handle_t* handle)
-  (define %ffi-uv-is-closing
-    (foreign-procedure "uv_is_closing" (void*) int))
+  (define-ffi %ffi-uv-close "uv_close" (void* void*) void)
+  (define-ffi %ffi-uv-ref "uv_ref" (void*) void)
+  (define-ffi %ffi-uv-unref "uv_unref" (void*) void)
+  (define-ffi %ffi-uv-has-ref "uv_has_ref" (void*) int)
+  (define-ffi %ffi-uv-is-active "uv_is_active" (void*) int)
+  (define-ffi %ffi-uv-is-closing "uv_is_closing" (void*) int)
 
   ;; ========================================
   ;; 句柄大小查询
   ;; ========================================
 
-  ;; size_t uv_handle_size(uv_handle_type type)
-  (define %ffi-uv-handle-size
-    (foreign-procedure "uv_handle_size" (int) size_t))
+  (define-ffi %ffi-uv-handle-size "uv_handle_size" (int) size_t)
 
   ;; 便捷函数：获取特定句柄类型的大小
   (define (%ffi-uv-timer-size)

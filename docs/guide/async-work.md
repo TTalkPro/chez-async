@@ -1,5 +1,42 @@
 # Async Work API Guide
 
+## Quick Example
+
+```scheme
+#!/usr/bin/env scheme-script
+
+(import (chezscheme) (chez-async))
+
+;; CPU-intensive task: fibonacci
+(define (fib n)
+  (if (<= n 1) n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(define loop (uv-loop-init))
+
+;; Execute in background
+(async-work loop
+  (lambda ()
+    (printf "[Worker] Computing fib(40)...~n")
+    (fib 40))
+  (lambda (result)
+    (printf "[Main] Result: ~a~n" result)
+    (uv-stop loop)))
+
+(printf "Event loop running (non-blocking)...~n")
+(uv-run loop 'default)
+(uv-loop-close loop)
+```
+
+Output:
+```
+Event loop running (non-blocking)...
+[Worker] Computing fib(40)...
+[Main] Result: 102334155
+```
+
+---
+
 ## 概述
 
 chez-async 提供了基于 Chez Scheme 线程池的异步任务系统，允许你在后台线程执行 CPU 密集型或阻塞型任务，同时保持主事件循环的响应性。
@@ -54,6 +91,8 @@ async callback (主线程)
 **示例**:
 
 ```scheme
+(import (chezscheme) (chez-async))
+
 (define loop (uv-loop-init))
 
 (async-work loop
@@ -86,15 +125,24 @@ async callback (主线程)
 **示例**:
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work/error loop
   (lambda ()
     (if (< (random 10) 5)
         (error 'task "random failure")
         "success"))
   (lambda (result)
-    (printf "Success: ~a~n" result))
+    (printf "Success: ~a~n" result)
+    (uv-stop loop))
   (lambda (error)
-    (printf "Error: ~a~n" (condition-message error))))
+    (printf "Error: ~a~n" (condition-message error))
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 #### `loop-threadpool`
@@ -116,6 +164,8 @@ async callback (主线程)
 **示例**:
 
 ```scheme
+(import (chezscheme) (chez-async))
+
 (define loop (uv-loop-init))
 
 ;; 创建 8 个工作线程的线程池
@@ -123,7 +173,15 @@ async callback (主线程)
 (threadpool-start! pool)
 (loop-set-threadpool! loop pool)
 
-(async-work loop ...) ; 使用自定义线程池
+;; 使用自定义线程池
+(async-work loop
+  (lambda () (expensive-computation))
+  (lambda (result)
+    (printf "Result: ~a~n" result)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 低层 API
@@ -177,17 +235,29 @@ async callback (主线程)
 ### 1. CPU 密集型计算
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 ;; 在后台计算斐波那契数
 (async-work loop
   (lambda ()
     (fib 40)) ; CPU 密集型
   (lambda (result)
-    (printf "fib(40) = ~a~n" result)))
+    (printf "fib(40) = ~a~n" result)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 2. 阻塞 I/O
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 ;; 在后台执行阻塞 I/O
 (async-work loop
   (lambda ()
@@ -195,24 +265,45 @@ async callback (主线程)
       (lambda (port)
         (read port)))) ; 可能阻塞
   (lambda (data)
-    (process-data data)))
+    (process-data data)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 3. 并行任务
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+(define completed 0)
+(define total 5)
+
 ;; 同时执行多个任务
 (for-each
   (lambda (i)
     (async-work loop
       (lambda () (expensive-computation i))
-      (lambda (result) (handle-result i result))))
+      (lambda (result)
+        (handle-result i result)
+        (set! completed (+ completed 1))
+        (when (= completed total)
+          (uv-stop loop)))))
   '(1 2 3 4 5))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 4. 数据处理管道
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work loop
   (lambda ()
     ;; Stage 1: 加载数据
@@ -223,7 +314,11 @@ async callback (主线程)
       (lambda () (process-data data))
       (lambda (processed)
         ;; Stage 3: 保存结果
-        (save-results processed)))))
+        (save-results processed)
+        (uv-stop loop)))))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ## 最佳实践
@@ -236,13 +331,17 @@ async callback (主线程)
 ```scheme
 ;; 不好：提交 1000 个小任务
 (for-each
-  (lambda (x) (async-work loop (lambda () (* x 2)) ...))
+  (lambda (x)
+    (async-work loop
+      (lambda () (* x 2))
+      (lambda (result) (handle-result result))))
   (iota 1000))
 
 ;; 好：批量处理
 (async-work loop
   (lambda () (map (lambda (x) (* x 2)) (iota 1000)))
-  ...)
+  (lambda (results)
+    (for-each handle-result results)))
 ```
 
 ### 2. 错误处理
@@ -251,14 +350,23 @@ async callback (主线程)
 - ✅ 在工作函数中使用 `guard` 捕获特定错误
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work/error loop
   (lambda ()
     (guard (e [(file-not-found? e) #f])
       (load-optional-file "config.txt")))
   (lambda (result)
-    (when result (use-config result)))
+    (when result (use-config result))
+    (uv-stop loop))
   (lambda (error)
-    (log-error error)))
+    (log-error error)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 3. 资源管理
@@ -267,13 +375,22 @@ async callback (主线程)
 - ❌ 不要在工作线程中访问主线程的 UI 或 libuv 句柄
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work loop
   (lambda ()
-    (call-with-port (open-file ...)
+    (call-with-port (open-file "data.txt" 'read)
       (lambda (port)
         ;; 使用 port
         (read-all port)))) ; port 会自动关闭
-  callback)
+  (lambda (data)
+    (process-data data)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 4. 线程池大小
@@ -283,6 +400,10 @@ async callback (主线程)
 - I/O 密集型任务：可以增加到 8-16
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 ;; 根据 CPU 核心数调整
 (define pool-size
   (+ 1 (string->number
@@ -291,6 +412,16 @@ async callback (主线程)
 (define pool (make-threadpool loop pool-size))
 (threadpool-start! pool)
 (loop-set-threadpool! loop pool)
+
+;; 使用自定义线程池
+(async-work loop
+  (lambda () (compute))
+  (lambda (result)
+    (printf "Result: ~a~n" result)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 5. 避免共享状态
@@ -299,19 +430,27 @@ async callback (主线程)
 - ❌ 不要在工作线程中修改全局变量
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 ;; 不好：修改全局变量
 (define *global-result* #f)
 (async-work loop
   (lambda ()
     (set! *global-result* (compute)) ; 竞态条件！
     #t)
-  ...)
+  (lambda (ok) (uv-stop loop)))
 
 ;; 好：返回结果
 (async-work loop
   (lambda () (compute))
   (lambda (result)
-    (set! *global-result* result))) ; 在主线程安全
+    (set! *global-result* result) ; 在主线程安全
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ## 内部实现
@@ -368,6 +507,10 @@ async callback (主线程)
 ### 1. 打印调试信息
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work loop
   (lambda ()
     (fprintf (current-error-port) "[Worker ~a] Start~n" (current-thread))
@@ -375,12 +518,20 @@ async callback (主线程)
       (fprintf (current-error-port) "[Worker ~a] Done~n" (current-thread))
       result))
   (lambda (result)
-    (fprintf (current-error-port) "[Main] Result: ~a~n" result)))
+    (fprintf (current-error-port) "[Main] Result: ~a~n" result)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 2. 测量执行时间
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work loop
   (lambda ()
     (let ([start (current-time 'time-monotonic)])
@@ -390,12 +541,21 @@ async callback (主线程)
                   (+ (time-second elapsed)
                      (/ (time-nanosecond elapsed) 1e9)))
           result))))
-  callback)
+  (lambda (result)
+    (printf "Result: ~a~n" result)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### 3. 错误回溯
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+(define loop (uv-loop-init))
+
 (async-work/error loop
   (lambda ()
     (guard (e [else
@@ -404,8 +564,15 @@ async callback (主线程)
                          (lambda (p) (display-condition e p))))
                (raise e)])
       (risky-operation)))
-  success-cb
-  error-cb)
+  (lambda (result)
+    (printf "Success: ~a~n" result)
+    (uv-stop loop))
+  (lambda (error)
+    (fprintf (current-error-port) "Error caught in main thread: ~a~n" error)
+    (uv-stop loop)))
+
+(uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ## 常见问题
@@ -415,6 +582,8 @@ async callback (主线程)
 A: 使用计数器：
 
 ```scheme
+(import (chezscheme) (chez-async))
+
 (define loop (uv-loop-init))
 (define total 10)
 (define completed 0)
@@ -431,6 +600,7 @@ A: 使用计数器：
     (task-loop (+ i 1))))
 
 (uv-run loop 'default)
+(uv-loop-close loop)
 ```
 
 ### Q: 工作线程可以访问什么？
@@ -450,6 +620,9 @@ A: 工作线程可以：
 A: 先停止事件循环，再关闭线程池：
 
 ```scheme
+(import (chezscheme) (chez-async))
+
+;; 在程序结束时
 (uv-stop loop)
 (uv-run loop 'default) ; 清理剩余事件
 

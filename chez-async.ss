@@ -22,6 +22,32 @@
     uv-handle-active?
     uv-handle-closing?
 
+    ;; 句柄包装器（完整名称，向后兼容）
+    make-uv-handle-wrapper
+    uv-handle-wrapper?
+    uv-handle-wrapper-ptr
+    uv-handle-wrapper-type
+    uv-handle-wrapper-loop
+    uv-handle-wrapper-scheme-data
+    uv-handle-wrapper-scheme-data-set!
+    uv-handle-wrapper-closed?
+    uv-handle-wrapper-closed?-set!
+    uv-handle-wrapper-close-callback
+    uv-handle-wrapper-close-callback-set!
+
+    ;; 句柄包装器（简化别名，推荐使用）
+    make-handle
+    handle?
+    handle-ptr
+    handle-type
+    handle-loop
+    handle-data
+    handle-data-set!
+    handle-closed?
+    handle-closed?-set!
+    handle-close-callback
+    handle-close-callback-set!
+
     ;; Timer
     uv-timer-init
     uv-timer-start!

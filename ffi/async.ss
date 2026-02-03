@@ -7,18 +7,14 @@
     %ffi-uv-async-init
     %ffi-uv-async-send
     )
-  (import (chezscheme))
+  (import (chezscheme)
+          (chez-async internal macros))
 
   ;; ========================================
   ;; Async API
   ;; ========================================
 
-  ;; int uv_async_init(uv_loop_t* loop, uv_async_t* async, uv_async_cb cb)
-  (define %ffi-uv-async-init
-    (foreign-procedure "uv_async_init" (void* void* void*) int))
-
-  ;; int uv_async_send(uv_async_t* async)
-  (define %ffi-uv-async-send
-    (foreign-procedure "uv_async_send" (void*) int))
+  (define-ffi %ffi-uv-async-init "uv_async_init" (void* void* void*) int)
+  (define-ffi %ffi-uv-async-send "uv_async_send" (void*) int)
 
 ) ; end library

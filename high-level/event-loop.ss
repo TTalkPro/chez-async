@@ -26,7 +26,9 @@
   (import (chezscheme)
           (chez-async ffi types)
           (chez-async ffi errors)
-          (chez-async ffi core))
+          (chez-async ffi core)
+          (chez-async internal macros)
+          (chez-async internal utils))
 
   ;; ========================================
   ;; 事件循环包装器
@@ -47,22 +49,19 @@
   (define (uv-loop-init)
     "创建新的事件循环"
     (let* ([size (%ffi-uv-loop-size)]
-           [ptr (foreign-alloc size)])
-      ;; 初始化内存为 0
-      (let loop ([i 0])
-        (when (< i size)
-          (foreign-set! 'unsigned-8 ptr i 0)
-          (loop (+ i 1))))
+           [ptr (allocate-zeroed size)])
       ;; 初始化事件循环
-      (check-uv-result (%ffi-uv-loop-init ptr) 'uv-loop-init)
+      (with-uv-check uv-loop-init
+        (%ffi-uv-loop-init ptr))
       (make-uv-loop ptr)))
 
   (define (uv-loop-close loop)
     "关闭事件循环并释放资源"
     (let ([ptr (uv-loop-ptr loop)])
-      (check-uv-result (%ffi-uv-loop-close ptr) 'uv-loop-close)
+      (with-uv-check uv-loop-close
+        (%ffi-uv-loop-close ptr))
       (unlock-object ptr)
-      (foreign-free ptr)))
+      (safe-free ptr)))
 
   (define (uv-default-loop)
     "获取默认事件循环（全局单例）"

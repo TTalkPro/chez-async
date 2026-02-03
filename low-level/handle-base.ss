@@ -4,7 +4,7 @@
 
 (library (chez-async low-level handle-base)
   (export
-    ;; 句柄包装器类型
+    ;; 句柄包装器类型（完整名称）
     make-uv-handle-wrapper
     uv-handle-wrapper?
     uv-handle-wrapper-ptr
@@ -16,6 +16,19 @@
     uv-handle-wrapper-closed?-set!
     uv-handle-wrapper-close-callback
     uv-handle-wrapper-close-callback-set!
+
+    ;; 简化别名（推荐使用）
+    make-handle
+    handle?
+    handle-ptr
+    handle-type
+    handle-loop
+    handle-data
+    handle-data-set!
+    handle-closed?
+    handle-closed?-set!
+    handle-close-callback
+    handle-close-callback-set!
 
     ;; 句柄操作
     uv-handle-close!
@@ -34,7 +47,8 @@
           (chez-async ffi types)
           (chez-async ffi errors)
           (chez-async ffi handles)
-          (chez-async ffi callbacks))
+          (chez-async ffi callbacks)
+          (chez-async internal utils))
 
   ;; ========================================
   ;; 句柄包装器记录类型
@@ -64,13 +78,7 @@
 
   (define (allocate-handle size)
     "分配句柄内存"
-    (let ([ptr (foreign-alloc size)])
-      ;; 初始化为 0
-      (let loop ([i 0])
-        (when (< i size)
-          (foreign-set! 'unsigned-8 ptr i 0)
-          (loop (+ i 1))))
-      ptr))
+    (allocate-zeroed size))
 
   (define (store-wrapper-in-handle! handle-ptr wrapper)
     "将包装器对象存储到注册表"
@@ -93,7 +101,7 @@
         (make-close-callback
           (lambda (wrapper)
             ;; 执行用户关闭回调
-            (let ([user-cb (uv-handle-wrapper-close-callback wrapper)])
+            (let ([user-cb (handle-close-callback wrapper)])
               (when user-cb
                 (guard (e [else (handle-callback-error e)])
                   (user-cb wrapper))))
@@ -104,15 +112,15 @@
   (define (cleanup-handle-wrapper! wrapper)
     "清理句柄包装器资源"
     ;; 解锁 scheme-data
-    (let ([data (uv-handle-wrapper-scheme-data wrapper)])
+    (let ([data (handle-data wrapper)])
       (when data (unlock-object data)))
     ;; 从注册表中删除
-    (let ([ptr (uv-handle-wrapper-ptr wrapper)])
+    (let ([ptr (handle-ptr wrapper)])
       (unregister-ptr-wrapper! ptr))
     ;; 解锁 wrapper 本身
     (unlock-object wrapper)
     ;; 释放句柄内存
-    (foreign-free (uv-handle-wrapper-ptr wrapper)))
+    (safe-free (handle-ptr wrapper)))
 
   ;; ========================================
   ;; 句柄操作
@@ -120,31 +128,47 @@
 
   (define (uv-handle-close! wrapper . user-callback)
     "关闭句柄，确保资源正确释放"
-    (unless (uv-handle-wrapper-closed? wrapper)
-      (uv-handle-wrapper-closed?-set! wrapper #t)
+    (unless (handle-closed? wrapper)
+      (handle-closed?-set! wrapper #t)
       (when (not (null? user-callback))
-        (uv-handle-wrapper-close-callback-set! wrapper (car user-callback)))
-      (%ffi-uv-close (uv-handle-wrapper-ptr wrapper)
+        (handle-close-callback-set! wrapper (car user-callback)))
+      (%ffi-uv-close (handle-ptr wrapper)
                      (get-close-callback))))
 
   (define (uv-handle-ref! wrapper)
     "增加句柄引用计数（防止事件循环退出）"
-    (%ffi-uv-ref (uv-handle-wrapper-ptr wrapper)))
+    (%ffi-uv-ref (handle-ptr wrapper)))
 
   (define (uv-handle-unref! wrapper)
     "减少句柄引用计数（允许事件循环退出）"
-    (%ffi-uv-unref (uv-handle-wrapper-ptr wrapper)))
+    (%ffi-uv-unref (handle-ptr wrapper)))
 
   (define (uv-handle-has-ref? wrapper)
     "检查句柄是否有引用"
-    (not (= 0 (%ffi-uv-has-ref (uv-handle-wrapper-ptr wrapper)))))
+    (not (= 0 (%ffi-uv-has-ref (handle-ptr wrapper)))))
 
   (define (uv-handle-active? wrapper)
     "检查句柄是否活跃"
-    (not (= 0 (%ffi-uv-is-active (uv-handle-wrapper-ptr wrapper)))))
+    (not (= 0 (%ffi-uv-is-active (handle-ptr wrapper)))))
 
   (define (uv-handle-closing? wrapper)
     "检查句柄是否正在关闭"
-    (not (= 0 (%ffi-uv-is-closing (uv-handle-wrapper-ptr wrapper)))))
+    (not (= 0 (%ffi-uv-is-closing (handle-ptr wrapper)))))
+
+  ;; ========================================
+  ;; 简化别名（向后兼容）
+  ;; ========================================
+
+  (define make-handle make-uv-handle-wrapper)
+  (define handle? uv-handle-wrapper?)
+  (define handle-ptr uv-handle-wrapper-ptr)
+  (define handle-type uv-handle-wrapper-type)
+  (define handle-loop uv-handle-wrapper-loop)
+  (define handle-data uv-handle-wrapper-scheme-data)
+  (define handle-data-set! uv-handle-wrapper-scheme-data-set!)
+  (define handle-closed? uv-handle-wrapper-closed?)
+  (define handle-closed?-set! uv-handle-wrapper-closed?-set!)
+  (define handle-close-callback uv-handle-wrapper-close-callback)
+  (define handle-close-callback-set! uv-handle-wrapper-close-callback-set!)
 
 ) ; end library

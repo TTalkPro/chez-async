@@ -32,11 +32,9 @@
   (define libuv-lib
     (load-shared-object "libuv.so.1"))
 
-  ;; const char* uv_err_name(int err)
   (define %ffi-uv-err-name
     (foreign-procedure "uv_err_name" (int) string))
 
-  ;; const char* uv_strerror(int err)
   (define %ffi-uv-strerror
     (foreign-procedure "uv_strerror" (int) string))
 

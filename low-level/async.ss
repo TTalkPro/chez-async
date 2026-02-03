@@ -17,7 +17,9 @@
           (chez-async ffi async)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop))
+          (chez-async high-level event-loop)
+          (chez-async internal macros)
+          (chez-async internal utils))
 
   ;; ========================================
   ;; 全局 Async 回调
@@ -31,7 +33,7 @@
       (set! *async-callback*
         (make-async-callback
           (lambda (wrapper)
-            (let ([user-callback (uv-handle-wrapper-scheme-data wrapper)])
+            (let ([user-callback (handle-data wrapper)])
               (when user-callback
                 (guard (e [else
                            (fprintf (current-error-port)
@@ -50,13 +52,12 @@
     (let* ([size (%ffi-uv-async-size)]
            [ptr (allocate-handle size)]
            [loop-ptr (uv-loop-ptr loop)])
-      (check-uv-result/cleanup
+      (with-uv-check/cleanup uv-async-init
         (%ffi-uv-async-init loop-ptr ptr (get-async-callback))
-        'uv-async-init
         (lambda () (foreign-free ptr)))
-      (let ([wrapper (make-uv-handle-wrapper ptr 'async loop)])
+      (let ([wrapper (make-handle ptr 'async loop)])
         ;; 保存用户回调
-        (uv-handle-wrapper-scheme-data-set! wrapper callback)
+        (handle-data-set! wrapper callback)
         (lock-object callback)
         wrapper)))
 
@@ -67,8 +68,7 @@
   (define (uv-async-send! async-handle)
     "发送异步通知（唤醒事件循环）
      async-handle: async wrapper"
-    (check-uv-result
-      (%ffi-uv-async-send (uv-handle-wrapper-ptr async-handle))
-      'uv-async-send))
+    (with-uv-check uv-async-send
+      (%ffi-uv-async-send (handle-ptr async-handle))))
 
 ) ; end library
