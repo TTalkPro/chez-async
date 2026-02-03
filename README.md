@@ -1,6 +1,34 @@
 # chez-async
 
+**High-performance async programming library for Chez Scheme**
+
 Chez Scheme async programming library with libuv integration and native threadpool
+
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20FreeBSD-blue)](#快速开始)
+[![Chez Scheme](https://img.shields.io/badge/Chez%20Scheme-10.0%2B-green)](#前置要求)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+---
+
+## 目录
+
+- [📢 重构更新](#-重构更新-2026-02-03)
+- [为什么选择 chez-async？](#为什么选择-chez-async)
+- [核心特性](#核心特性)
+- [项目状态](#项目状态)
+- [架构设计](#架构设计)
+- [快速开始](#快速开始)
+- [运行示例](#运行示例)
+- [API 文档](#api-文档)
+- [📚 文档](#-文档)
+- [项目结构](#项目结构)
+- [内存管理](#内存管理)
+- [开发路线图](#开发路线图)
+- [参考项目](#参考项目)
+- [获取帮助](#获取帮助)
+- [贡献](#贡献)
+
+---
 
 ## 📢 重构更新 (2026-02-03)
 
@@ -23,6 +51,52 @@ Chez Scheme async programming library with libuv integration and native threadpo
 - ✅ 零性能损失
 
 详见：[重构报告](REFACTORING-REPORT.md) | [命名规范](docs/naming-convention.md)
+
+---
+
+## 为什么选择 chez-async？
+
+### 设计理念
+
+chez-async 遵循 **直接 FFI 绑定** 的设计原则，参考 chez-socket 的成功模式：
+
+- **零 C/C++ 包装层**: 直接使用 Chez Scheme 的 FFI 调用 libuv，避免额外的 C 代码维护
+- **类型安全**: 完整的类型系统和错误处理机制
+- **内存安全**: lock-object/unlock-object 配合 GC，自动管理对象生命周期
+- **性能优先**: 编译时宏展开，运行时零开销
+
+### 与其他方案的区别
+
+| 特性 | chez-async | 传统 C 包装 | 纯 Scheme 实现 |
+|------|-----------|------------|---------------|
+| 性能 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ |
+| 维护成本 | 低 | 高 | 中 |
+| 跨平台 | 优秀 | 需编译 | 优秀 |
+| 线程安全 | 原生支持 | 依赖实现 | 有限 |
+| 事件循环 | libuv (工业级) | 自定义 | select/poll |
+
+### 核心优势
+
+1. **工业级事件循环**: 基于 libuv，被 Node.js、Julia 等项目验证
+2. **原生线程池**: 自主实现 Chez Scheme 线程池，避免与 libuv 的 `uv_queue_work` 冲突
+3. **简洁易用**: 简化的 API 命名，符合 Scheme 习惯
+4. **完整文档**: 详细的指南、API 参考和示例代码
+5. **测试覆盖**: 完整的测试套件，跨平台验证（Linux、FreeBSD）
+
+---
+
+## 核心特性
+
+- **🚀 高性能**: 直接 FFI 绑定 libuv，零 C/C++ 包装层开销
+- **🧵 原生线程池**: 自主实现 Chez Scheme 线程池，完全控制任务调度
+- **🔒 线程安全**: 使用 `uv_async_t` 进行线程间通信，mutex 保护共享数据
+- **💾 内存安全**: 自动 GC 管理，lock-object 防止对象被回收
+- **📝 简洁 API**: 简化的命名规范（名称缩短 56%），更符合 Scheme 惯例
+- **🔄 100% 向后兼容**: 旧 API 完全保留，平滑迁移
+- **🎯 事件驱动**: libuv 事件循环，非阻塞 I/O
+- **⚡ 异步任务**: 支持 CPU 密集型和阻塞型后台任务
+
+---
 
 ## 项目状态
 
@@ -87,13 +161,38 @@ libuv C Library
 
 ### 前置要求
 
-- Chez Scheme 9.5 或更高版本
-- libuv 1.x（开发包）
+- **Chez Scheme** (version 10.0 or higher recommended)
+- **libuv** development package (version 1.x)
 
-在 Debian/Ubuntu 上安装：
+#### 在 Debian/Ubuntu 上安装：
 
 ```bash
 sudo apt-get install chezscheme libuv1-dev
+```
+
+#### 在 macOS 上安装：
+
+```bash
+brew install chezscheme libuv
+```
+
+#### 在 Fedora/RHEL 上安装：
+
+```bash
+sudo dnf install chezscheme libuv-devel
+```
+
+#### 在 FreeBSD 上安装：
+
+```bash
+sudo pkg install chez-scheme libuv
+```
+
+#### 验证安装：
+
+```bash
+scheme --version
+pkg-config --modversion libuv
 ```
 
 ### 示例：简单定时器
@@ -130,6 +229,8 @@ sudo apt-get install chezscheme libuv1-dev
 ### 示例：重复定时器
 
 ```scheme
+(import (chezscheme) (chez-async))
+
 (define loop (uv-loop-init))
 (define timer (uv-timer-init loop))
 (define count 0)
@@ -143,6 +244,34 @@ sudo apt-get install chezscheme libuv1-dev
       (uv-timer-stop! t)
       (uv-handle-close! t))))
 
+(uv-run loop 'default)
+(uv-loop-close loop)
+```
+
+### 示例：后台任务（Async Work）
+
+```scheme
+#!/usr/bin/env scheme-script
+
+(import (chezscheme) (chez-async))
+
+;; CPU 密集型任务
+(define (fib n)
+  (if (<= n 1) n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(define loop (uv-loop-init))
+
+;; 在后台线程执行计算
+(async-work loop
+  (lambda ()
+    (printf "[Worker] Computing fib(40)...~n")
+    (fib 40))
+  (lambda (result)
+    (printf "[Main] Result: ~a~n" result)
+    (uv-stop loop)))
+
+(printf "Event loop running (non-blocking)...~n")
 (uv-run loop 'default)
 (uv-loop-close loop)
 ```
@@ -268,32 +397,48 @@ chmod +x tests/test-timer.ss
 
 ```
 chez-async/
+├── internal/               # 内部工具和宏
+│   ├── macros.ss           # FFI 和错误处理宏
+│   └── utils.ss            # 通用工具函数
+│
 ├── ffi/                    # FFI 底层绑定
 │   ├── types.ss            # C 类型定义
 │   ├── errors.ss           # 错误处理
 │   ├── core.ss             # 核心 API
 │   ├── handles.ss          # 句柄操作
-│   ├── requests.ss         # 请求操作
 │   ├── callbacks.ss        # 回调管理
-│   └── timer.ss            # Timer FFI
+│   ├── timer.ss            # Timer FFI
+│   └── async.ss            # Async 句柄 FFI
 │
 ├── low-level/              # 低层 Scheme 封装
-│   ├── handle-base.ss      # 句柄包装器基础
+│   ├── handle-base.ss      # 句柄包装器基础（简化 API）
 │   ├── request-base.ss     # 请求包装器基础
 │   ├── buffer.ss           # 缓冲区管理
-│   └── timer.ss            # Timer 高层封装
+│   ├── timer.ss            # Timer 高层封装
+│   ├── async.ss            # Async 句柄封装
+│   └── threadpool.ss       # 线程池核心实现
 │
 ├── high-level/             # 高层 Scheme 风格接口
-│   └── event-loop.ss       # 事件循环封装
+│   ├── event-loop.ss       # 事件循环封装
+│   └── async-work.ss       # 异步任务 API
 │
-├── tests/                  # 测试
+├── tests/                  # 测试套件
 │   ├── test-framework.ss   # 测试框架
-│   └── test-timer.ss       # Timer 测试
+│   ├── test-timer.ss       # Timer 测试
+│   └── test-async.ss       # Async work 测试
 │
 ├── examples/               # 示例代码
-│   └── timer-demo.ss       # Timer 示例
+│   ├── timer-demo.ss       # Timer 示例
+│   └── async-work-demo.ss  # 后台任务示例
 │
-└── README.md
+├── docs/                   # 完整文档
+│   ├── guide/              # 用户指南
+│   │   ├── getting-started.md
+│   │   └── async-work.md
+│   └── api/                # API 参考
+│       └── timer.md
+│
+└── chez-async.ss           # 主库文件（统一导出）
 ```
 
 ## 内存管理
@@ -309,21 +454,27 @@ chez-async/
 
 ### Phase 1: 基础设施 ✅
 
-- FFI 类型系统
-- 错误处理
-- 回调管理
-- 句柄/请求包装器
+- ✅ FFI 类型系统
+- ✅ 错误处理和条件类型
+- ✅ 回调管理基础设施
+- ✅ 句柄/请求包装器
+- ✅ 内存管理和 GC 安全
+- ✅ 宏系统（代码生成）
 
-### Phase 2: Timer ✅
+### Phase 2: Timer & Threadpool ✅
 
-- Timer API 实现
-- 测试和示例
+- ✅ Timer API 实现
+- ✅ Chez Scheme 线程池系统
+- ✅ 异步任务队列（async-work API）
+- ✅ uv_async_t 跨线程通信
+- ✅ 测试和示例
+- ✅ 简化 API 命名规范
 
-### Phase 3: TCP（进行中）
+### Phase 3: TCP（计划中）
 
-- Stream 基础
-- TCP 客户端和服务器
-- Echo 服务器示例
+- ⏳ Stream 基础
+- ⏳ TCP 客户端和服务器
+- ⏳ Echo 服务器示例
 
 ### Phase 4: 文件系统
 
@@ -342,11 +493,54 @@ chez-async/
 - Promise/Future 风格 API
 - 完整文档
 
+## 📚 文档
+
+### 指南
+
+- **[Getting Started](docs/guide/getting-started.md)** - 快速入门教程
+  - 安装和配置
+  - 核心概念（事件循环、句柄、回调）
+  - 简化 Handle API
+  - 错误处理
+  - 最佳实践
+
+- **[Async Work Guide](docs/guide/async-work.md)** - 异步任务完整指南
+  - 架构和线程安全
+  - CPU 密集型和 I/O 密集型任务
+  - 错误处理和调试
+  - 性能优化
+  - 常见问题
+
+### API 参考
+
+- **[Timer API](docs/api/timer.md)** - 定时器 API 完整参考
+  - 单次和重复定时器
+  - 8 种常用模式（Countdown, Debounce, Throttle, Rate Limiter 等）
+  - 最佳实践
+  - 完整示例代码
+
+### 示例代码
+
+- `examples/timer-demo.ss` - Timer 使用示例
+- `examples/async-work-demo.ss` - 后台任务示例
+- `tests/test-timer.ss` - Timer 测试套件
+
+---
+
 ## 参考项目
 
 - [libuv](https://libuv.org/) - 官方文档
 - [chez-socket](https://github.com/arcfide/chez-socket) - 架构参考
 - [chez-async](https://github.com/ufo5260987423/chez-async) - libuv 绑定参考
+
+---
+
+## 获取帮助
+
+- **文档**: 查看 [Getting Started Guide](docs/guide/getting-started.md) 和 [API Reference](docs/api/timer.md)
+- **示例**: 浏览 `examples/` 目录获取完整示例代码
+- **问题**: 提交 GitHub Issue 报告 bug 或提问
+- **讨论**: 通过 Pull Request 参与代码贡献
 
 ## 许可证
 
@@ -356,6 +550,15 @@ MIT License
 
 欢迎贡献！请提交 Issue 或 Pull Request。
 
-## 作者
+贡献指南：
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
 
-基于计划文档实现
+## 致谢
+
+- [libuv](https://libuv.org/) - 提供高性能跨平台异步 I/O
+- [chez-socket](https://github.com/arcfide/chez-socket) - FFI 绑定设计参考
+- Chez Scheme 社区 - 提供优秀的 Scheme 实现
