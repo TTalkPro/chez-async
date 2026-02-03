@@ -1,2 +1,128 @@
+# chez-async .gitignore
+# ====================================
+
+# Chez Scheme compiled files
+*.so
+*.so.*
+*.wpo
+*.chez
+*.fasl
+
+# C/C++ object files
+*.o
+*.a
+*.dylib
+*.dll
+
+# Temporary test files (ad-hoc tests, not part of test suite)
+test-basic.scm
+run-simple-test.ss
+run-timer-tests.ss
+
+# Scratchpad and temporary directories
+scratchpad/
+tmp/
+.tmp/
+/tmp/
+
+# Build artifacts
 *.o
 *.so
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.#*
+\#*\#
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+._*
+
+# Log files
+*.log
+debug.log
+error.log
+
+# REPL history and state
+.chez-repl-history
+.scheme-history
+.guile_history
+
+# Documentation build artifacts
+docs/_build/
+docs/.doctrees/
+
+# Test output
+test-output/
+coverage/
+*.test.log
+
+# Local configuration
+.env
+.env.local
+config.local.ss
+local-config.ss
+
+# Backup files
+*.orig
+*.bak
+*~
+*.backup
+
+# Coverage and profiling
+*.gcov
+*.gcda
+*.gcno
+gmon.out
+
+# Core dumps (but not core.ss files)
+/core
+/core.*
+vgcore.*
+!**/core.ss
+
+# Python bytecode (if using Python tools)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Compiled documentation
+*.pdf
+*.dvi
+*.aux
+*.toc
+*.out
+
+# Git merge files
+*.BACKUP.*
+*.BASE.*
+*.LOCAL.*
+*.REMOTE.*
+*_BACKUP_*
+*_BASE_*
+*_LOCAL_*
+*_REMOTE_*
+
+# Tags
+tags
+TAGS
+.tags
+.TAGS
+
+# Project-specific ignores
+NOTES.md
+TODO.local.md
+scratch.ss
+playground.ss
+
+# macOS specific
+.AppleDouble
+.LSOverride
+Icon
