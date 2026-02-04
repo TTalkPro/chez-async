@@ -104,7 +104,7 @@
       (foreign-callable
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
-            (let ([wrapper (ptr->wrapper req-ptr)])
+            (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
                       [result (%ffi-uv-fs-req-result req-ptr)])
@@ -123,7 +123,7 @@
       (foreign-callable
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
-            (let ([wrapper (ptr->wrapper req-ptr)])
+            (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
                       [result (%ffi-uv-fs-req-result req-ptr)])
@@ -143,7 +143,7 @@
       (foreign-callable
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
-            (let ([wrapper (ptr->wrapper req-ptr)])
+            (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
                       [result (%ffi-uv-fs-req-result req-ptr)])
@@ -163,7 +163,7 @@
       (foreign-callable
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
-            (let ([wrapper (ptr->wrapper req-ptr)])
+            (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
                       [result (%ffi-uv-fs-req-result req-ptr)])

@@ -66,12 +66,12 @@
       ptr))
 
   (define (store-wrapper-in-request! request-ptr wrapper)
-    "将包装器对象存储到注册表"
-    (register-ptr-wrapper! request-ptr wrapper))
+    "将包装器对象存储到请求全局注册表"
+    (register-request-wrapper! request-ptr wrapper))
 
   (define (get-wrapper-from-request request-ptr)
-    "从注册表获取包装器对象"
-    (ptr->wrapper request-ptr))
+    "从请求全局注册表获取包装器对象"
+    (request-ptr->wrapper request-ptr))
 
   (define (cleanup-request-wrapper! wrapper)
     "清理请求包装器（在回调执行后调用）"
@@ -81,9 +81,9 @@
     ;; 解锁 scheme-data
     (let ([data (uv-request-wrapper-scheme-data wrapper)])
       (when data (unlock-object data)))
-    ;; 从注册表中删除
+    ;; 从请求全局注册表中删除
     (let ([ptr (uv-request-wrapper-ptr wrapper)])
-      (unregister-ptr-wrapper! ptr))
+      (unregister-request-wrapper! ptr))
     ;; 解锁 wrapper 本身
     (unlock-object wrapper)
     ;; 释放请求内存

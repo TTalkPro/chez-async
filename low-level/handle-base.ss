@@ -48,6 +48,7 @@
           (chez-async ffi errors)
           (chez-async ffi handles)
           (chez-async ffi callbacks)
+          (chez-async high-level event-loop)
           (chez-async internal utils)
           (chez-async internal callback-registry)
           (chez-async internal macros))
@@ -68,8 +69,8 @@
       (lambda (new)
         (lambda (ptr type loop)
           (let ([wrapper (new ptr type loop #f #f #f)])
-            ;; 将 wrapper 存储到 handle->data 字段（第一个字段）
-            (store-wrapper-in-handle! ptr wrapper)
+            ;; 将 wrapper 注册到 loop 的 per-loop 注册表
+            (loop-register-wrapper! loop ptr wrapper)
             ;; 防止 wrapper 被 GC
             (lock-object wrapper)
             wrapper)))))
@@ -82,12 +83,16 @@
     "分配句柄内存"
     (allocate-zeroed size))
 
-  (define (store-wrapper-in-handle! handle-ptr wrapper)
-    "将包装器对象存储到注册表"
-    (register-ptr-wrapper! handle-ptr wrapper))
+  (define (store-wrapper-in-handle! loop handle-ptr wrapper)
+    "将包装器对象存储到 loop 的 per-loop 注册表
+     loop: 事件循环包装器
+     handle-ptr: 句柄 C 指针
+     wrapper: 句柄包装器对象"
+    (loop-register-wrapper! loop handle-ptr wrapper))
 
   (define (get-wrapper-from-handle handle-ptr)
-    "从注册表获取包装器对象"
+    "从注册表获取包装器对象
+     注意：此函数使用 per-loop 注册表，通过 uv_handle_get_loop 获取 loop"
     (ptr->wrapper handle-ptr))
 
   ;; ========================================
@@ -118,9 +123,10 @@
     ;; 解锁 scheme-data
     (let ([data (handle-data wrapper)])
       (when data (unlock-object data)))
-    ;; 从注册表中删除
-    (let ([ptr (handle-ptr wrapper)])
-      (unregister-ptr-wrapper! ptr))
+    ;; 从 loop 的 per-loop 注册表中删除
+    (let ([loop (handle-loop wrapper)]
+          [ptr (handle-ptr wrapper)])
+      (loop-unregister-wrapper! loop ptr))
     ;; 解锁 wrapper 本身
     (unlock-object wrapper)
     ;; 释放句柄内存

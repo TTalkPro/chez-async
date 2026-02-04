@@ -1,6 +1,15 @@
 ;;; high-level/event-loop.ss - 事件循环封装
 ;;;
 ;;; 提供友好的事件循环接口
+;;;
+;;; 设计说明：
+;;; 每个 event-loop 维护自己的注册表，避免使用全局变量：
+;;; - ptr-registry: C 指针 → Scheme 包装器对象的映射
+;;;
+;;; 这种设计的优点：
+;;; 1. 无全局状态，多个 loop 互不影响
+;;; 2. 易于测试，可以创建独立的测试 loop
+;;; 3. 符合 libuv 的 per-loop 架构
 
 (library (chez-async high-level event-loop)
   (export
@@ -22,6 +31,14 @@
 
     ;; 内部 API（低层使用）
     uv-loop-ptr
+
+    ;; Per-loop 注册表操作
+    loop-register-wrapper!
+    loop-unregister-wrapper!
+    loop-get-wrapper
+
+    ;; Loop 查找（用于回调）
+    get-loop-by-ptr
     )
   (import (chezscheme)
           (chez-async ffi types)
@@ -33,14 +50,75 @@
   ;; ========================================
   ;; 事件循环包装器
   ;; ========================================
+  ;;
+  ;; uv-loop 记录类型包含：
+  ;; - ptr: libuv uv_loop_t 的 C 指针
+  ;; - ptr-registry: C 指针到 Scheme 包装器的哈希表
+  ;;
+  ;; ptr-registry 用于在 C 回调中从指针找回 Scheme 对象
 
   (define-record-type uv-loop
-    (fields (immutable ptr))
+    (fields
+      (immutable ptr)           ; uv_loop_t* C 指针
+      (immutable ptr-registry)) ; hashtable: C 指针 → Scheme 包装器
     (protocol
       (lambda (new)
         (lambda (ptr)
           (lock-object ptr)
-          (new ptr)))))
+          (new ptr (make-eqv-hashtable))))))
+
+  ;; ========================================
+  ;; Per-loop 注册表操作
+  ;; ========================================
+  ;;
+  ;; 这些函数替代了之前的全局注册表
+  ;; 每个 handle/request 在创建时注册，关闭时注销
+
+  (define (loop-register-wrapper! loop ptr wrapper)
+    "注册 C 指针到 Scheme 包装器的映射
+     loop: 事件循环
+     ptr: C 指针（handle 或 request 的地址）
+     wrapper: 对应的 Scheme 包装器对象"
+    (hashtable-set! (uv-loop-ptr-registry loop) ptr wrapper))
+
+  (define (loop-unregister-wrapper! loop ptr)
+    "注销 C 指针的映射（通常在 handle 关闭时调用）
+     loop: 事件循环
+     ptr: 要注销的 C 指针"
+    (hashtable-delete! (uv-loop-ptr-registry loop) ptr))
+
+  (define (loop-get-wrapper loop ptr)
+    "从 C 指针获取 Scheme 包装器
+     loop: 事件循环
+     ptr: C 指针
+     返回: 包装器对象，如果未找到则返回 #f"
+    (hashtable-ref (uv-loop-ptr-registry loop) ptr #f))
+
+  ;; ========================================
+  ;; Loop 注册表（全局）
+  ;; ========================================
+  ;;
+  ;; 这是唯一的全局状态，用于从 C 指针查找 loop 包装器。
+  ;; 在回调中，我们通过 uv_handle_get_loop 获取 loop 指针，
+  ;; 然后通过此注册表找到对应的 Scheme loop 包装器。
+  ;;
+  ;; 条目数量很少（通常只有 1-2 个 loop），所以影响很小。
+
+  (define *loop-registry* (make-eqv-hashtable))
+
+  (define (register-loop! loop)
+    "注册 loop 到全局注册表（在 uv-loop-init 中调用）"
+    (hashtable-set! *loop-registry* (uv-loop-ptr loop) loop))
+
+  (define (unregister-loop! loop)
+    "从全局注册表注销 loop（在 uv-loop-close 中调用）"
+    (hashtable-delete! *loop-registry* (uv-loop-ptr loop)))
+
+  (define (get-loop-by-ptr ptr)
+    "通过 C 指针查找 loop 包装器
+     ptr: uv_loop_t* C 指针
+     返回: loop 包装器，如果未找到则返回 #f"
+    (hashtable-ref *loop-registry* ptr #f))
 
   ;; ========================================
   ;; 事件循环创建和销毁
@@ -53,11 +131,16 @@
       ;; 初始化事件循环
       (with-uv-check uv-loop-init
         (%ffi-uv-loop-init ptr))
-      (make-uv-loop ptr)))
+      (let ([loop (make-uv-loop ptr)])
+        ;; 注册到全局 loop 注册表
+        (register-loop! loop)
+        loop)))
 
   (define (uv-loop-close loop)
     "关闭事件循环并释放资源"
     (let ([ptr (uv-loop-ptr loop)])
+      ;; 从全局注册表注销
+      (unregister-loop! loop)
       (with-uv-check uv-loop-close
         (%ffi-uv-loop-close ptr))
       (unlock-object ptr)

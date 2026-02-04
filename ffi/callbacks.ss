@@ -6,29 +6,31 @@
 ;;;    - 防止 foreign-callable 被垃圾回收
 ;;;    - 通过 register-c-callback!/unregister-c-callback! 访问
 ;;;
-;;; 2. 指针-包装器映射 (*ptr-to-wrapper-registry*)
-;;;    - 将 C 指针映射到 Scheme 包装器对象
-;;;    - 通过 ptr->wrapper/register-ptr-wrapper!/unregister-ptr-wrapper! 访问
+;;; 2. 指针-包装器查找 (ptr->wrapper)
+;;;    - 从 C 指针查找对应的 Scheme 包装器
+;;;    - 使用 per-loop 注册表，通过 uv_handle_get_loop 获取 loop
 ;;;
 ;;; 3. 回调工厂函数 (make-*-callback)
 ;;;    - 创建各种类型的 foreign-callable
 ;;;    - 自动注册到 GC 保护注册表
-;;;    - 自动查找指针对应的包装器
 ;;;
-;;; 注意：此模块与 internal/callback-registry.ss 配合使用：
-;;; - internal/callback-registry.ss 管理延迟初始化的全局回调
-;;; - 此模块提供回调工厂和运行时管理
+;;; 设计说明：
+;;; 指针-包装器映射已移至 per-loop 注册表（在 high-level/event-loop.ss），
+;;; 避免了全局变量。查找流程：handle-ptr → loop-ptr → loop → wrapper
 
 (library (chez-async ffi callbacks)
   (export
-    ;; 回调注册
+    ;; GC 保护注册
     register-c-callback!
     unregister-c-callback!
 
-    ;; 指针-对象注册
+    ;; 句柄指针-包装器查找（使用 per-loop 注册表）
     ptr->wrapper
-    register-ptr-wrapper!
-    unregister-ptr-wrapper!
+
+    ;; 请求指针-包装器注册（使用小的全局注册表）
+    register-request-wrapper!
+    unregister-request-wrapper!
+    request-ptr->wrapper
 
     ;; 回调工厂函数
     make-generic-callback
@@ -56,7 +58,9 @@
     handle-callback-error
     )
   (import (chezscheme)
-          (chez-async ffi errors))
+          (chez-async ffi errors)
+          (chez-async ffi handles)
+          (chez-async high-level event-loop))
 
   ;; ========================================
   ;; GC 保护注册表
@@ -99,36 +103,44 @@
                  e)))
 
   ;; ========================================
-  ;; 指针-包装器映射注册表
+  ;; 指针-包装器查找
   ;; ========================================
   ;;
-  ;; 此注册表维护 C 指针到 Scheme 包装器对象的映射。
-  ;; 当 libuv 回调被触发时，我们只能得到 C 指针，
-  ;; 需要通过此注册表找到对应的 Scheme 包装器对象。
+  ;; 分两种情况处理：
   ;;
-  ;; 典型用法：
-  ;; 1. 创建句柄/请求时：(register-ptr-wrapper! ptr wrapper)
-  ;; 2. 回调中查找包装器：(ptr->wrapper ptr)
-  ;; 3. 关闭时清理：(unregister-ptr-wrapper! ptr)
+  ;; 1. 句柄（Handles）：使用 per-loop 注册表
+  ;;    handle-ptr → uv_handle_get_loop → loop-ptr → loop → wrapper
+  ;;    优点：无全局变量，多个 loop 互不影响
+  ;;
+  ;; 2. 请求（Requests）：使用小的全局注册表
+  ;;    请求是短生命周期对象，没有 uv_handle_get_loop 等效函数
+  ;;    所以保留一个小的全局注册表用于请求
 
-  (define *ptr-to-wrapper-registry* (make-hashtable equal-hash equal?))
+  ;; 请求注册表（全局，但仅用于短生命周期的请求）
+  (define *request-registry* (make-eqv-hashtable))
 
-  (define (ptr->wrapper ptr)
-    "从 C 指针获取对应的 Scheme 包装器对象
-     ptr: libuv 句柄或请求的 C 指针
-     返回: 对应的包装器对象，如果未找到则返回 #f"
-    (hashtable-ref *ptr-to-wrapper-registry* ptr #f))
+  (define (register-request-wrapper! ptr wrapper)
+    "注册请求包装器（全局注册表）"
+    (hashtable-set! *request-registry* ptr wrapper))
 
-  (define (register-ptr-wrapper! ptr wrapper)
-    "注册 C 指针和 Scheme 包装器的映射
-     ptr: libuv 句柄或请求的 C 指针
-     wrapper: 对应的 Scheme 包装器对象（handle 或 request）"
-    (hashtable-set! *ptr-to-wrapper-registry* ptr wrapper))
+  (define (unregister-request-wrapper! ptr)
+    "注销请求包装器"
+    (hashtable-delete! *request-registry* ptr))
 
-  (define (unregister-ptr-wrapper! ptr)
-    "从注册表中移除指针映射（通常在句柄关闭时调用）
-     ptr: 要移除的 C 指针"
-    (hashtable-delete! *ptr-to-wrapper-registry* ptr))
+  (define (request-ptr->wrapper ptr)
+    "从请求 C 指针获取包装器"
+    (hashtable-ref *request-registry* ptr #f))
+
+  (define (ptr->wrapper handle-ptr)
+    "从句柄 C 指针获取对应的 Scheme 包装器对象
+     handle-ptr: libuv 句柄的 C 指针
+     返回: 对应的包装器对象，如果未找到则返回 #f
+
+     注意：此函数适用于句柄（handle）。
+     对于请求（request），请使用 request-ptr->wrapper。"
+    (let* ([loop-ptr (%ffi-uv-handle-get-loop handle-ptr)]
+           [loop (get-loop-by-ptr loop-ptr)])
+      (and loop (loop-get-wrapper loop handle-ptr))))
 
   ;; ========================================
   ;; 回调工厂函数
@@ -138,13 +150,15 @@
   (define (make-generic-callback scheme-proc signature)
     "创建通用回调包装器
      signature: 回调的参数签名
-       - (void*): 单个句柄指针参数（timer, close）
-       - (void* int): 句柄/请求指针 + 状态码（write, connect）
-       - (void* ssize_t void*): 流指针 + 读取字节数 + 缓冲区（read）
+       - (void*): 单个句柄指针参数（timer, close）- 使用 ptr->wrapper
+       - (void* int request): 请求指针 + 状态码（write, connect）- 使用 request-ptr->wrapper
+       - (void* ssize_t void*): 流指针 + 读取字节数 + 缓冲区（read）- 使用 ptr->wrapper
+       - (void* int connection): 连接监听回调 - 使用 ptr->wrapper
      "
     (let ([wrapper
            (case signature
              ;; 单个句柄指针参数 (timer, close, idle, prepare, check, etc.)
+             ;; 使用 per-loop 注册表
              [((void*))
               (foreign-callable
                 (lambda (handle-ptr)
@@ -153,16 +167,18 @@
                       (when wrapper (scheme-proc wrapper)))))
                 (void*) void)]
 
-             ;; 请求指针 + 状态码 (write, connect, shutdown, fs, etc.)
-             [((void* int))
+             ;; 请求指针 + 状态码 (write, connect, shutdown, etc.)
+             ;; 使用请求全局注册表
+             [((void* int request))
               (foreign-callable
                 (lambda (req-ptr status)
                   (guard (e [else (handle-callback-error e)])
-                    (let ([wrapper (ptr->wrapper req-ptr)])
+                    (let ([wrapper (request-ptr->wrapper req-ptr)])
                       (when wrapper (scheme-proc wrapper status)))))
                 (void* int) void)]
 
              ;; 流读取回调 (stream, tty, pipe, tcp, etc.)
+             ;; 使用 per-loop 注册表
              [((void* ssize_t void*))
               (foreign-callable
                 (lambda (stream-ptr nread buf-ptr)
@@ -171,7 +187,8 @@
                       (when wrapper (scheme-proc wrapper nread buf-ptr)))))
                 (void* ssize_t void*) void)]
 
-             ;; 连接回调 (listen callback)
+             ;; 连接监听回调 (listen callback on server handle)
+             ;; 使用 per-loop 注册表
              [((void* int connection))
               (foreign-callable
                 (lambda (server-ptr status)
@@ -214,19 +231,22 @@
     (make-generic-callback scheme-proc '(void* ssize_t void*)))
 
   ;; write 回调: void (*uv_write_cb)(uv_write_t* req, int status)
+  ;; 使用请求注册表
   (define (make-write-callback scheme-proc)
     "创建写入回调"
-    (make-generic-callback scheme-proc '(void* int)))
+    (make-generic-callback scheme-proc '(void* int request)))
 
   ;; connect 回调: void (*uv_connect_cb)(uv_connect_t* req, int status)
+  ;; 使用请求注册表
   (define (make-connect-callback scheme-proc)
     "创建连接回调"
-    (make-generic-callback scheme-proc '(void* int)))
+    (make-generic-callback scheme-proc '(void* int request)))
 
   ;; shutdown 回调: void (*uv_shutdown_cb)(uv_shutdown_t* req, int status)
+  ;; 使用请求注册表
   (define (make-shutdown-callback scheme-proc)
     "创建关闭流回调"
-    (make-generic-callback scheme-proc '(void* int)))
+    (make-generic-callback scheme-proc '(void* int request)))
 
   ;; connection 回调: void (*uv_connection_cb)(uv_stream_t* server, int status)
   (define (make-connection-callback scheme-proc)
@@ -239,9 +259,10 @@
     (make-generic-callback scheme-proc '(void*)))
 
   ;; UDP send 回调: void (*uv_udp_send_cb)(uv_udp_send_t* req, int status)
+  ;; 使用请求注册表
   (define (make-udp-send-callback scheme-proc)
     "创建 UDP 发送回调"
-    (make-generic-callback scheme-proc '(void* int)))
+    (make-generic-callback scheme-proc '(void* int request)))
 
   ;; UDP recv 回调: void (*uv_udp_recv_cb)(uv_udp_t* handle, ssize_t nread,
   ;;                                        const uv_buf_t* buf,

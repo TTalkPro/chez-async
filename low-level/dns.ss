@@ -43,12 +43,13 @@
   ;; c-string->string 从 foreign-utils 模块导入，避免重复定义
 
   ;; getaddrinfo 回调：处理 DNS 解析完成
+  ;; 注意：使用 request-ptr->wrapper 因为这是请求回调
   (define-registered-callback get-getaddrinfo-callback CALLBACK-GETADDRINFO
     (lambda ()
       (foreign-callable
         (lambda (req-ptr status addrinfo-ptr)
           (guard (e [else (handle-callback-error e)])
-            (let ([wrapper (ptr->wrapper req-ptr)])
+            (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)])
                   (when user-callback
@@ -63,12 +64,13 @@
         (void* int void*) void)))
 
   ;; getnameinfo 回调：处理反向 DNS 解析完成
+  ;; 注意：使用 request-ptr->wrapper 因为这是请求回调
   (define-registered-callback get-getnameinfo-callback CALLBACK-GETNAMEINFO
     (lambda ()
       (foreign-callable
         (lambda (req-ptr status hostname-ptr service-ptr)
           (guard (e [else (handle-callback-error e)])
-            (let ([wrapper (ptr->wrapper req-ptr)])
+            (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)])
                   (when user-callback

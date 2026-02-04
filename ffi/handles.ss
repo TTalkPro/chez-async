@@ -18,6 +18,7 @@
     %ffi-uv-has-ref        ; 检查是否有引用
     %ffi-uv-is-active      ; 检查是否活动
     %ffi-uv-is-closing     ; 检查是否正在关闭
+    %ffi-uv-handle-get-loop ; 获取句柄关联的事件循环
 
     ;; 句柄大小查询（用于内存分配）
     %ffi-uv-handle-size    ; 通用大小查询
@@ -76,6 +77,11 @@
   ;; 检查句柄是否正在关闭或已关闭
   ;; 返回值：非零表示正在/已关闭
   (define-ffi %ffi-uv-is-closing "uv_is_closing" (void*) int)
+
+  ;; uv_loop_t* uv_handle_get_loop(const uv_handle_t* handle)
+  ;; 获取句柄关联的事件循环
+  ;; 返回值：事件循环指针
+  (define-ffi %ffi-uv-handle-get-loop "uv_handle_get_loop" (void*) void*)
 
   ;; ========================================
   ;; 句柄大小查询
