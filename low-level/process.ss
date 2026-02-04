@@ -75,17 +75,16 @@
        scheme-proc - Scheme 回调过程 (lambda (wrapper exit-status term-signal) ...)
 
      返回：
-       foreign-callable 对象"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr exit-status term-signal)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)])
-                   (when wrapper
-                     (scheme-proc wrapper exit-status term-signal)))))
-             (void* integer-64 int) void)])
-      (register-c-callback! (cons scheme-proc 'exit) wrapper)
-      wrapper))
+       foreign-callable 对象
+
+     注意：返回的 foreign-callable 由 callback-registry 管理，无需额外 GC 保护。"
+    (foreign-callable
+      (lambda (handle-ptr exit-status term-signal)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)])
+            (when wrapper
+              (scheme-proc wrapper exit-status term-signal)))))
+      (void* integer-64 int) void))
 
   ;; 使用统一回调注册表管理退出回调
   (define-registered-callback get-exit-callback CALLBACK-PROCESS-EXIT

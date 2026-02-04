@@ -1,18 +1,19 @@
 ;;; ffi/callbacks.ss - 回调管理基础设施
 ;;;
-;;; 本模块提供 C 回调的创建、注册和管理机制：
+;;; 本模块提供 C 回调的创建和管理机制：
 ;;;
-;;; 1. GC 保护注册表 (*gc-protected-callbacks*)
-;;;    - 防止 foreign-callable 被垃圾回收
-;;;    - 通过 register-c-callback!/unregister-c-callback! 访问
-;;;
-;;; 2. 指针-包装器查找 (ptr->wrapper)
+;;; 1. 指针-包装器查找 (ptr->wrapper)
 ;;;    - 从 C 指针查找对应的 Scheme 包装器
 ;;;    - 使用 per-loop 注册表，通过 uv_handle_get_loop 获取 loop
 ;;;
-;;; 3. 回调工厂函数 (make-*-callback)
+;;; 2. 回调工厂函数 (make-*-callback)
 ;;;    - 创建各种类型的 foreign-callable
-;;;    - 自动注册到 GC 保护注册表
+;;;    - 返回的 foreign-callable 由 internal/callback-registry.ss 管理
+;;;
+;;; GC 保护说明：
+;;; foreign-callable 的 GC 保护由 internal/callback-registry.ss 的
+;;; *callback-registry* 提供。当 foreign-callable 存储在 callback-registry
+;;; 的 instance 部分时，它不会被 GC 回收。
 ;;;
 ;;; 设计说明：
 ;;; 指针-包装器映射已移至 per-loop 注册表（在 internal/loop-registry.ss），
@@ -24,10 +25,6 @@
 
 (library (chez-async ffi callbacks)
   (export
-    ;; GC 保护注册
-    register-c-callback!
-    unregister-c-callback!
-
     ;; 句柄指针-包装器查找（使用 per-loop 注册表）
     ptr->wrapper
 
@@ -71,33 +68,6 @@
           (chez-async ffi errors)
           (chez-async ffi handles)
           (chez-async internal loop-registry))
-
-  ;; ========================================
-  ;; GC 保护注册表
-  ;; ========================================
-  ;;
-  ;; 此注册表用于防止 foreign-callable 被垃圾回收。
-  ;; 当创建 foreign-callable 后，必须将其存储在此注册表中，
-  ;; 否则可能在 C 代码调用前就被 GC 回收。
-  ;;
-  ;; 注意：这与 internal/callback-registry.ss 中的回调注册表不同：
-  ;; - internal/callback-registry.ss: 管理延迟初始化的全局回调工厂
-  ;; - 此注册表: 防止已创建的 foreign-callable 被 GC 回收
-
-  (define *gc-protected-callbacks* (make-eq-hashtable))
-
-  (define (register-c-callback! key callback)
-    "注册 C 回调到 GC 保护注册表，防止被垃圾回收
-     key: 唯一标识键（通常为 (cons proc signature)）
-     callback: foreign-callable 对象
-     返回: callback 本身"
-    (hashtable-set! *gc-protected-callbacks* key callback)
-    callback)
-
-  (define (unregister-c-callback! key)
-    "从 GC 保护注册表中移除回调
-     key: 之前注册时使用的键"
-    (hashtable-delete! *gc-protected-callbacks* key))
 
   ;; ========================================
   ;; 错误处理
@@ -171,53 +141,53 @@
        - (void* int request): 请求指针 + 状态码（write, connect）- 使用 request-ptr->wrapper
        - (void* ssize_t void*): 流指针 + 读取字节数 + 缓冲区（read）- 使用 ptr->wrapper
        - (void* int connection): 连接监听回调 - 使用 ptr->wrapper
-     返回: foreign-callable 对象"
-    (let ([wrapper
-           (case signature
-             ;; 单个句柄指针参数 (timer, close, idle, prepare, check, etc.)
-             ;; 使用 per-loop 注册表
-             [((void*))
-              (foreign-callable
-                (lambda (handle-ptr)
-                  (guard (e [else (handle-callback-error e)])
-                    (let ([wrapper (ptr->wrapper handle-ptr)])
-                      (when wrapper (scheme-proc wrapper)))))
-                (void*) void)]
+     返回: foreign-callable 对象
 
-             ;; 请求指针 + 状态码 (write, connect, shutdown, etc.)
-             ;; 使用请求全局注册表
-             [((void* int request))
-              (foreign-callable
-                (lambda (req-ptr status)
-                  (guard (e [else (handle-callback-error e)])
-                    (let ([wrapper (request-ptr->wrapper req-ptr)])
-                      (when wrapper (scheme-proc wrapper status)))))
-                (void* int) void)]
+     注意：返回的 foreign-callable 应由调用者负责保持引用（通常通过
+     internal/callback-registry.ss）以防止 GC 回收。"
+    (case signature
+      ;; 单个句柄指针参数 (timer, close, idle, prepare, check, etc.)
+      ;; 使用 per-loop 注册表
+      [((void*))
+       (foreign-callable
+         (lambda (handle-ptr)
+           (guard (e [else (handle-callback-error e)])
+             (let ([wrapper (ptr->wrapper handle-ptr)])
+               (when wrapper (scheme-proc wrapper)))))
+         (void*) void)]
 
-             ;; 流读取回调 (stream, tty, pipe, tcp, etc.)
-             ;; 使用 per-loop 注册表
-             [((void* ssize_t void*))
-              (foreign-callable
-                (lambda (stream-ptr nread buf-ptr)
-                  (guard (e [else (handle-callback-error e)])
-                    (let ([wrapper (ptr->wrapper stream-ptr)])
-                      (when wrapper (scheme-proc wrapper nread buf-ptr)))))
-                (void* ssize_t void*) void)]
+      ;; 请求指针 + 状态码 (write, connect, shutdown, etc.)
+      ;; 使用请求全局注册表
+      [((void* int request))
+       (foreign-callable
+         (lambda (req-ptr status)
+           (guard (e [else (handle-callback-error e)])
+             (let ([wrapper (request-ptr->wrapper req-ptr)])
+               (when wrapper (scheme-proc wrapper status)))))
+         (void* int) void)]
 
-             ;; 连接监听回调 (listen callback on server handle)
-             ;; 使用 per-loop 注册表
-             [((void* int connection))
-              (foreign-callable
-                (lambda (server-ptr status)
-                  (guard (e [else (handle-callback-error e)])
-                    (let ([wrapper (ptr->wrapper server-ptr)])
-                      (when wrapper (scheme-proc wrapper status)))))
-                (void* int) void)]
+      ;; 流读取回调 (stream, tty, pipe, tcp, etc.)
+      ;; 使用 per-loop 注册表
+      [((void* ssize_t void*))
+       (foreign-callable
+         (lambda (stream-ptr nread buf-ptr)
+           (guard (e [else (handle-callback-error e)])
+             (let ([wrapper (ptr->wrapper stream-ptr)])
+               (when wrapper (scheme-proc wrapper nread buf-ptr)))))
+         (void* ssize_t void*) void)]
 
-             [else
-              (error 'make-generic-callback "unsupported signature" signature)])])
-      (register-c-callback! (cons scheme-proc signature) wrapper)
-      wrapper))
+      ;; 连接监听回调 (listen callback on server handle)
+      ;; 使用 per-loop 注册表
+      [((void* int connection))
+       (foreign-callable
+         (lambda (server-ptr status)
+           (guard (e [else (handle-callback-error e)])
+             (let ([wrapper (ptr->wrapper server-ptr)])
+               (when wrapper (scheme-proc wrapper status)))))
+         (void* int) void)]
+
+      [else
+       (error 'make-generic-callback "unsupported signature" signature)]))
 
   ;; close 回调: void (*uv_close_cb)(uv_handle_t* handle)
   (define (make-close-callback scheme-proc)
@@ -235,15 +205,12 @@
   (define (make-alloc-callback scheme-proc)
     "创建内存分配回调
      scheme-proc: 回调过程 (lambda (wrapper suggested-size buf-ptr) ...)"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr suggested-size buf-ptr)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)])
-                   (when wrapper (scheme-proc wrapper suggested-size buf-ptr)))))
-             (void* size_t void*) void)])
-      (register-c-callback! (cons scheme-proc 'alloc) wrapper)
-      wrapper))
+    (foreign-callable
+      (lambda (handle-ptr suggested-size buf-ptr)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)])
+            (when wrapper (scheme-proc wrapper suggested-size buf-ptr)))))
+      (void* size_t void*) void))
 
   ;; read 回调: void (*uv_read_cb)(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
   (define (make-read-callback scheme-proc)
@@ -298,43 +265,34 @@
   (define (make-udp-recv-callback scheme-proc)
     "创建 UDP 接收回调
      scheme-proc: 回调过程 (lambda (wrapper nread buf-ptr addr-ptr flags) ...)"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr nread buf-ptr addr-ptr flags)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)])
-                   (when wrapper (scheme-proc wrapper nread buf-ptr addr-ptr flags)))))
-             (void* ssize_t void* void* unsigned-int) void)])
-      (register-c-callback! (cons scheme-proc 'udp-recv) wrapper)
-      wrapper))
+    (foreign-callable
+      (lambda (handle-ptr nread buf-ptr addr-ptr flags)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)])
+            (when wrapper (scheme-proc wrapper nread buf-ptr addr-ptr flags)))))
+      (void* ssize_t void* void* unsigned-int) void))
 
   ;; Signal 回调: void (*uv_signal_cb)(uv_signal_t* handle, int signum)
   (define (make-signal-callback scheme-proc)
     "创建信号处理回调
      scheme-proc: 回调过程 (lambda (wrapper signum) ...)"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr signum)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)])
-                   (when wrapper (scheme-proc wrapper signum)))))
-             (void* int) void)])
-      (register-c-callback! (cons scheme-proc 'signal) wrapper)
-      wrapper))
+    (foreign-callable
+      (lambda (handle-ptr signum)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)])
+            (when wrapper (scheme-proc wrapper signum)))))
+      (void* int) void))
 
   ;; Poll 回调: void (*uv_poll_cb)(uv_poll_t* handle, int status, int events)
   (define (make-poll-callback scheme-proc)
     "创建轮询回调
      scheme-proc: 回调过程 (lambda (wrapper status events) ...)"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr status events)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)])
-                   (when wrapper (scheme-proc wrapper status events)))))
-             (void* int int) void)])
-      (register-c-callback! (cons scheme-proc 'poll) wrapper)
-      wrapper))
+    (foreign-callable
+      (lambda (handle-ptr status events)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)])
+            (when wrapper (scheme-proc wrapper status events)))))
+      (void* int int) void))
 
   ;; FS Event 回调: void (*uv_fs_event_cb)(uv_fs_event_t* handle,
   ;;                                        const char* filename,
@@ -342,18 +300,15 @@
   (define (make-fs-event-callback scheme-proc)
     "创建文件系统事件回调
      scheme-proc: 回调过程 (lambda (wrapper filename events status) ...)"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr filename-ptr events status)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)]
-                       [filename (if (= filename-ptr 0)
-                                     #f
-                                     (get-string-from-ptr filename-ptr))])
-                   (when wrapper (scheme-proc wrapper filename events status)))))
-             (void* void* int int) void)])
-      (register-c-callback! (cons scheme-proc 'fs-event) wrapper)
-      wrapper))
+    (foreign-callable
+      (lambda (handle-ptr filename-ptr events status)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)]
+                [filename (if (= filename-ptr 0)
+                              #f
+                              (get-string-from-ptr filename-ptr))])
+            (when wrapper (scheme-proc wrapper filename events status)))))
+      (void* void* int int) void))
 
   ;; FS Poll 回调: void (*uv_fs_poll_cb)(uv_fs_poll_t* handle,
   ;;                                      int status,
@@ -362,16 +317,13 @@
   (define (make-fs-poll-callback scheme-proc)
     "创建文件系统轮询回调
      scheme-proc: 回调过程 (lambda (wrapper status prev-stat-ptr curr-stat-ptr) ...)"
-    (let ([wrapper
-           (foreign-callable
-             (lambda (handle-ptr status prev-stat-ptr curr-stat-ptr)
-               (guard (e [else (handle-callback-error e)])
-                 (let ([wrapper (ptr->wrapper handle-ptr)])
-                   (when wrapper
-                     (scheme-proc wrapper status prev-stat-ptr curr-stat-ptr)))))
-             (void* int void* void*) void)])
-      (register-c-callback! (cons scheme-proc 'fs-poll) wrapper)
-      wrapper))
+    (foreign-callable
+      (lambda (handle-ptr status prev-stat-ptr curr-stat-ptr)
+        (guard (e [else (handle-callback-error e)])
+          (let ([wrapper (ptr->wrapper handle-ptr)])
+            (when wrapper
+              (scheme-proc wrapper status prev-stat-ptr curr-stat-ptr)))))
+      (void* int void* void*) void))
 
   ;; ========================================
   ;; 辅助函数
