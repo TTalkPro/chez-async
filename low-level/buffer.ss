@@ -13,9 +13,6 @@
     ;; 缓冲区读取
     uv-buf->bytevector
     uv-buf-array->bytevectors
-
-    ;; 默认 alloc 回调
-    make-default-alloc-callback
     )
   (import (chezscheme)
           (chez-async ffi types))
@@ -116,32 +113,9 @@
             (loop (+ i 1) (cons bv result))))))
 
   ;; ========================================
-  ;; 默认 alloc 回调
+  ;; 注意：alloc 回调相关的临时缓冲区存储
+  ;; 已移至 stream.ss 使用 handle-data 机制
+  ;; 或使用 event-loop.ss 的 per-loop temp-buffers
   ;; ========================================
-
-  (define *temp-buffers* (make-eq-hashtable))
-
-  (define (store-temp-buffer! handle bv)
-    "临时存储缓冲区（用于 alloc 回调）"
-    (hashtable-set! *temp-buffers* handle bv))
-
-  (define (get-temp-buffer handle)
-    "获取并移除临时缓冲区"
-    (let ([bv (hashtable-ref *temp-buffers* handle #f)])
-      (when bv
-        (hashtable-delete! *temp-buffers* handle))
-      bv))
-
-  (define (make-default-alloc-callback suggested-size)
-    "创建默认的内存分配回调
-     suggested-size: 建议的缓冲区大小"
-    (lambda (handle size buf-ptr)
-      ;; 分配 C 内存而不是使用 Scheme bytevector
-      ;; 这样避免 GC 问题
-      (let ([data-ptr (foreign-alloc suggested-size)])
-        (ftype-set! uv-buf-t (base) buf-ptr data-ptr)
-        (ftype-set! uv-buf-t (len) buf-ptr suggested-size)
-        ;; 存储指针以便后续释放
-        (store-temp-buffer! handle data-ptr))))
 
 ) ; end library

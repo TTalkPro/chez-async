@@ -1,6 +1,8 @@
 ;;; high-level/async-work.ss - 异步任务 API
 ;;;
 ;;; 提供用户友好的后台任务接口
+;;;
+;;; 线程池存储在 uv-loop 记录中（per-loop），避免全局变量
 
 (library (chez-async high-level async-work)
   (export
@@ -13,26 +15,33 @@
     async-work/error
     )
   (import (chezscheme)
+          (chez-async high-level event-loop)
           (chez-async low-level threadpool))
 
   ;; ========================================
-  ;; 每个 loop 关联一个线程池
+  ;; 线程池配置
   ;; ========================================
 
-  (define *loop-threadpools* (make-eq-hashtable))
   (define *default-threadpool-size* 4)
+
+  ;; ========================================
+  ;; 每个 loop 关联一个线程池（Per-loop）
+  ;; ========================================
+  ;;
+  ;; 线程池存储在 uv-loop 记录的 threadpool 字段中
+  ;; 懒初始化：首次访问时创建
 
   (define (loop-threadpool loop)
     "获取或创建 loop 的线程池（默认 4 个工作线程）"
-    (or (hashtable-ref *loop-threadpools* loop #f)
+    (or (uv-loop-threadpool loop)
         (let ([pool (make-threadpool loop *default-threadpool-size*)])
           (threadpool-start! pool)
-          (hashtable-set! *loop-threadpools* loop pool)
+          (uv-loop-threadpool-set! loop pool)
           pool)))
 
   (define (loop-set-threadpool! loop pool)
     "设置 loop 的线程池"
-    (hashtable-set! *loop-threadpools* loop pool))
+    (uv-loop-threadpool-set! loop pool))
 
   ;; ========================================
   ;; 异步任务 API

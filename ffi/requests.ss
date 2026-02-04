@@ -31,6 +31,7 @@
     %ffi-uv-fs-req-size        ; fs 请求大小
     %ffi-uv-getaddrinfo-req-size ; getaddrinfo 请求大小
     %ffi-uv-getnameinfo-req-size ; getnameinfo 请求大小
+    %ffi-uv-udp-send-req-size    ; UDP 发送请求大小
     )
   (import (chezscheme)
           (chez-async ffi lib)
@@ -133,5 +134,9 @@
   (define (%ffi-uv-getnameinfo-req-size)
     "获取 uv_getnameinfo_t 结构大小"
     (%ffi-uv-req-size (uv-req-type->int 'getnameinfo)))
+
+  (define (%ffi-uv-udp-send-req-size)
+    "获取 uv_udp_send_t 结构大小"
+    (%ffi-uv-req-size (uv-req-type->int 'udp-send)))
 
 ) ; end library

@@ -45,13 +45,9 @@
     ;; 发送队列
     %ffi-uv-udp-get-send-queue-size   ; 获取发送队列大小
     %ffi-uv-udp-get-send-queue-count  ; 获取发送队列数量
-
-    ;; 请求大小
-    %ffi-uv-udp-send-req-size         ; UDP 发送请求大小
     )
   (import (chezscheme)
           (chez-async ffi lib)
-          (chez-async ffi requests)
           (chez-async internal macros))
 
   ;; 确保 libuv 库在此模块范围内已加载
@@ -183,14 +179,5 @@
   ;; size_t uv_udp_get_send_queue_count(const uv_udp_t* handle)
   ;; 获取发送队列中待发送的请求数
   (define-ffi %ffi-uv-udp-get-send-queue-count "uv_udp_get_send_queue_count" (void*) size_t)
-
-  ;; ========================================
-  ;; 请求大小
-  ;; ========================================
-
-  ;; 使用 uv_req_size 获取 uv_udp_send_t 的大小
-  (define (%ffi-uv-udp-send-req-size)
-    "获取 uv_udp_send_t 结构大小"
-    (%ffi-uv-req-size 5))  ; udp-send = 5
 
 ) ; end library

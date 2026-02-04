@@ -39,6 +39,14 @@
 
     ;; Loop 查找（用于回调）
     get-loop-by-ptr
+
+    ;; Threadpool 管理（per-loop）
+    uv-loop-threadpool
+    uv-loop-threadpool-set!
+
+    ;; 临时缓冲区管理（per-loop）
+    loop-store-temp-buffer!
+    loop-get-temp-buffer
     )
   (import (chezscheme)
           (chez-async ffi types)
@@ -54,18 +62,26 @@
   ;; uv-loop 记录类型包含：
   ;; - ptr: libuv uv_loop_t 的 C 指针
   ;; - ptr-registry: C 指针到 Scheme 包装器的哈希表
+  ;; - threadpool: 关联的线程池（可选）
+  ;; - temp-buffers: 临时缓冲区存储（用于 alloc 回调）
   ;;
-  ;; ptr-registry 用于在 C 回调中从指针找回 Scheme 对象
+  ;; 所有 per-loop 状态都存储在此记录中，避免全局变量
 
   (define-record-type uv-loop
     (fields
-      (immutable ptr)           ; uv_loop_t* C 指针
-      (immutable ptr-registry)) ; hashtable: C 指针 → Scheme 包装器
+      (immutable ptr)            ; uv_loop_t* C 指针
+      (immutable ptr-registry)   ; hashtable: C 指针 → Scheme 包装器
+      (mutable threadpool)       ; 关联的线程池（懒初始化）
+      (immutable temp-buffers))  ; hashtable: handle-ptr → temp buffer
     (protocol
       (lambda (new)
         (lambda (ptr)
           (lock-object ptr)
-          (new ptr (make-eqv-hashtable))))))
+          (new ptr
+               (make-eqv-hashtable)  ; ptr-registry
+               #f                     ; threadpool (initially none)
+               (make-eqv-hashtable)  ; temp-buffers
+               )))))
 
   ;; ========================================
   ;; Per-loop 注册表操作
@@ -93,6 +109,30 @@
      ptr: C 指针
      返回: 包装器对象，如果未找到则返回 #f"
     (hashtable-ref (uv-loop-ptr-registry loop) ptr #f))
+
+  ;; ========================================
+  ;; 临时缓冲区管理（Per-loop）
+  ;; ========================================
+  ;;
+  ;; 用于 alloc 回调中临时存储分配的缓冲区指针。
+  ;; 在 read 回调完成后释放。
+
+  (define (loop-store-temp-buffer! loop handle-ptr buffer-ptr)
+    "存储临时缓冲区（用于 alloc 回调）
+     loop: 事件循环
+     handle-ptr: handle 的 C 指针
+     buffer-ptr: 分配的缓冲区指针"
+    (hashtable-set! (uv-loop-temp-buffers loop) handle-ptr buffer-ptr))
+
+  (define (loop-get-temp-buffer loop handle-ptr)
+    "获取并移除临时缓冲区
+     loop: 事件循环
+     handle-ptr: handle 的 C 指针
+     返回: 缓冲区指针，如果未找到则返回 #f"
+    (let ([buffer (hashtable-ref (uv-loop-temp-buffers loop) handle-ptr #f)])
+      (when buffer
+        (hashtable-delete! (uv-loop-temp-buffers loop) handle-ptr))
+      buffer))
 
   ;; ========================================
   ;; Loop 注册表（全局）
