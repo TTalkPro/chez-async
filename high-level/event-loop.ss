@@ -122,7 +122,12 @@
     (let ([ptr (%ffi-uv-default-loop)])
       (when (= ptr 0)
         (error 'uv-default-loop "failed to get default loop"))
-      (make-uv-loop ptr)))
+      ;; 首先尝试从 registry 中查找已存在的 loop 对象
+      (or (get-loop-by-ptr ptr)
+          ;; 如果不存在，创建新的并注册
+          (let ([loop (make-uv-loop ptr)])
+            (register-loop! loop)
+            loop))))
 
   ;; ========================================
   ;; 事件循环运行
