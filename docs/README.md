@@ -32,6 +32,7 @@
 
 | 文档 | 说明 |
 |------|------|
+| [Scheduler Architecture](scheduler-architecture.md) | Loop、Scheduler 和 Pending 队列关联架构 |
 | [async Implementation](async-implementation-explained.md) | async 宏实现详解 |
 | [Promise Implementation](promise-implementation-explained.md) | Promise 实现详解 |
 
@@ -43,15 +44,6 @@
 |------|------|
 | [Timer API](api/timer.md) | Timer API 完整参考 |
 | [TCP API](api/tcp.md) | TCP API 完整参考 |
-
----
-
-## 📋 Phase 完成报告
-
-| 文档 | 说明 |
-|------|------|
-| [Phase 4 Complete](phase4-complete.md) | 完整实现报告（包含 Phase 1-4 总结）|
-| [Refactoring Complete](REFACTORING-COMPLETE.md) | 代码质量优化重构完成 |
 
 ---
 
@@ -68,8 +60,9 @@
 
 1. **[Cancellation Guide](cancellation-guide.md)** - 学习取消机制
 2. **[Async Work Guide](guide/async-work.md)** - 理解线程池
-3. **[async Implementation](async-implementation-explained.md)** - 深入理解实现
-4. **[Promise Implementation](promise-implementation-explained.md)** - 深入理解 Promise
+3. **[Scheduler Architecture](scheduler-architecture.md)** - 理解调度器架构
+4. **[async Implementation](async-implementation-explained.md)** - 深入理解实现
+5. **[Promise Implementation](promise-implementation-explained.md)** - 深入理解 Promise
 
 ### API 参考
 
@@ -84,10 +77,9 @@
 | 类型 | 数量 | 总行数 |
 |------|------|--------|
 | 使用指南 | 6 | ~3,500 |
-| 技术文档 | 2 | ~1,350 |
+| 技术文档 | 3 | ~2,200 |
 | API 参考 | 3 | ~1,050 |
-| 完成报告 | 2 | ~800 |
-| **总计** | **14** | **~6,700** |
+| **总计** | **13** | **~6,750** |
 
 ---
 
@@ -104,9 +96,10 @@
 
 ### 我想了解...
 
+- **Loop、Scheduler 和队列的关系？** → [Scheduler Architecture](scheduler-architecture.md)
 - **async 如何工作？** → [async Implementation](async-implementation-explained.md)
 - **Promise 如何实现？** → [Promise Implementation](promise-implementation-explained.md)
-- **项目的发展历程？** → [Phase 4 Complete Report](phase4-complete.md)
+- **项目状态和进展？** → [PROJECT-STATUS.md](../PROJECT-STATUS.md)
 
 ### 我想查阅...
 

@@ -581,12 +581,9 @@ chez-async/
 - **[Timer API](docs/api/timer.md)** - 定时器 API
 - **[TCP API](docs/api/tcp.md)** - TCP 套接字 API
 
-### 完成报告
-
-- **[Phase 4 Complete](docs/phase4-complete.md)** - 完整实现报告（Phase 1-4）
-- **[Refactoring Complete](docs/REFACTORING-COMPLETE.md)** - 代码质量优化
-
 完整文档索引：[docs/README.md](docs/README.md)
+
+项目状态：[PROJECT-STATUS.md](PROJECT-STATUS.md)
 
 ---
 
