@@ -2,7 +2,7 @@
 
 ## 📊 项目完成度
 
-**当前阶段**: Phase 1-11 完成 (约 85%)
+**当前阶段**: Phase 1-11 完成 (约 90%)
 
 | 类别 | 完成度 | 状态 |
 |------|--------|------|
@@ -18,6 +18,7 @@
 | Pipe 管道 | 100% | ✅ 完成 |
 | TTY 终端 | 100% | ✅ 完成 |
 | Poll 轮询 | 100% | ✅ 完成 |
+| Process 进程 | 100% | ✅ 完成 |
 | 其他句柄 | 0% | ⏳ 待实现 |
 | 高层抽象 | 0% | ⏳ 待实现 |
 
@@ -194,6 +195,21 @@
 - [x] 测试
   - [x] Poll 测试套件 (`tests/test-poll.ss`) - 5 个测试
 
+### Phase 10: Process (进程管理)
+
+- [x] FFI 绑定 (`ffi/process.ss`)
+  - [x] `%ffi-uv-spawn`
+  - [x] `%ffi-uv-process-kill` / `%ffi-uv-kill`
+  - [x] `%ffi-uv-process-get-pid`
+  - [x] 进程选项和 stdio 标志
+- [x] 低层封装 (`low-level/process.ss`)
+  - [x] `uv-spawn` - 启动子进程
+  - [x] `uv-process-kill!` / `uv-kill` - 发送信号
+  - [x] `uv-process-get-pid` - 获取 PID
+  - [x] `make-process-options` / `free-process-options` - 进程选项管理
+- [x] 测试
+  - [x] Process 测试套件 (`tests/test-process.ss`) - 6 个测试
+
 ---
 
 ## ⏳ 待实现功能
@@ -340,27 +356,40 @@
 
 ---
 
-### Phase 10: Process (进程管理)
+### Phase 10: Process (进程管理) ✅
 
-- [ ] **FFI 绑定** (`ffi/process.ss`)
-  - [ ] `%ffi-uv-spawn`
-  - [ ] `%ffi-uv-process-kill`
-  - [ ] `%ffi-uv-kill`
-  - [ ] `%ffi-uv-process-get-pid`
+*已在 2026-02-04 完成。*
 
-- [ ] **进程选项结构**
-  - [ ] `uv_process_options_t` 封装
-  - [ ] stdio 重定向配置
-  - [ ] 环境变量设置
+- [x] **FFI 绑定** (`ffi/process.ss`)
+  - [x] `%ffi-uv-spawn`
+  - [x] `%ffi-uv-process-kill`
+  - [x] `%ffi-uv-kill`
+  - [x] `%ffi-uv-process-get-pid`
+  - [x] `%ffi-uv-process-options-size`
+  - [x] `%ffi-uv-stdio-container-size`
+  - [x] 进程选项标志（UV_PROCESS_SETUID, UV_PROCESS_DETACHED 等）
+  - [x] stdio 标志（UV_IGNORE, UV_CREATE_PIPE 等）
 
-- [ ] **低层封装** (`low-level/process.ss`)
-  - [ ] `uv-spawn`
-  - [ ] `uv-process-kill!`
-  - [ ] 进程退出回调
+- [x] **进程选项结构**
+  - [x] `uv_process_options_t` 封装
+  - [x] `make-process-options` / `free-process-options`
+  - [x] 环境变量设置
+  - [x] 工作目录设置
 
-- [ ] **测试和文档**
+- [x] **低层封装** (`low-level/process.ss`)
+  - [x] `uv-spawn`
+  - [x] `uv-process-kill!`
+  - [x] `uv-process-get-pid`
+  - [x] `uv-kill`
+  - [x] 进程退出回调
 
-**预计工作量**: 2-3 天
+- [x] **测试** (`tests/test-process.ss`)
+  - [x] process-spawn-echo
+  - [x] process-spawn-with-exit-code
+  - [x] process-spawn-with-cwd
+  - [x] process-spawn-nonexistent
+  - [x] process-kill
+  - [x] process-detached
 
 ---
 
