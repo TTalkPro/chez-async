@@ -34,6 +34,8 @@
     %ffi-uv-prepare-size   ; Prepare 句柄大小
     %ffi-uv-check-size     ; Check 句柄大小
     %ffi-uv-idle-size      ; Idle 句柄大小
+    %ffi-uv-fs-event-size  ; FS Event 句柄大小
+    %ffi-uv-fs-poll-size   ; FS Poll 句柄大小
     )
   (import (chezscheme)
           (chez-async ffi lib)
@@ -142,5 +144,13 @@
   (define (%ffi-uv-idle-size)
     "获取 uv_idle_t 结构大小"
     (%ffi-uv-handle-size (uv-handle-type->int 'idle)))
+
+  (define (%ffi-uv-fs-event-size)
+    "获取 uv_fs_event_t 结构大小"
+    (%ffi-uv-handle-size (uv-handle-type->int 'fs-event)))
+
+  (define (%ffi-uv-fs-poll-size)
+    "获取 uv_fs_poll_t 结构大小"
+    (%ffi-uv-handle-size (uv-handle-type->int 'fs-poll)))
 
 ) ; end library

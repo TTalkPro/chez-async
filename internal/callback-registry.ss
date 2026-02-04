@@ -61,6 +61,15 @@
 
     ;; Poll 回调
     CALLBACK-POLL               ; 文件描述符轮询回调
+
+    ;; 事件循环钩子回调
+    CALLBACK-PREPARE            ; Prepare 回调（I/O 轮询前）
+    CALLBACK-CHECK              ; Check 回调（I/O 轮询后）
+    CALLBACK-IDLE               ; Idle 回调（空闲时）
+
+    ;; 文件系统监视回调
+    CALLBACK-FS-EVENT           ; FS Event 回调
+    CALLBACK-FS-POLL            ; FS Poll 回调
     )
   (import (chezscheme))
 
@@ -105,6 +114,15 @@
 
   ;; Poll 回调类型
   (define CALLBACK-POLL         'poll)
+
+  ;; 事件循环钩子回调类型
+  (define CALLBACK-PREPARE      'prepare)
+  (define CALLBACK-CHECK        'check)
+  (define CALLBACK-IDLE         'idle)
+
+  ;; 文件系统监视回调类型
+  (define CALLBACK-FS-EVENT     'fs-event)
+  (define CALLBACK-FS-POLL      'fs-poll)
 
   ;; ========================================
   ;; 内部数据结构

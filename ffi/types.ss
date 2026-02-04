@@ -11,6 +11,7 @@
     uv-fs-t uv-getaddrinfo-t
     uv-pipe-t uv-tty-t uv-poll-t uv-signal-t
     uv-process-t uv-async-t uv-prepare-t uv-check-t uv-idle-t
+    uv-fs-event-t uv-fs-poll-t
 
     ;; 结构体类型 (仅导出类型名，使用 ftype-ref/ftype-set! 访问字段)
     uv-buf-t
@@ -59,6 +60,8 @@
   (define uv-prepare-t 'void*)
   (define uv-check-t 'void*)
   (define uv-idle-t 'void*)
+  (define uv-fs-event-t 'void*)
+  (define uv-fs-poll-t 'void*)
 
   ;; 请求类型
   (define uv-connect-t 'void*)

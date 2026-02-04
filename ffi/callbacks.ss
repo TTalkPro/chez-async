@@ -54,6 +54,12 @@
     ;; Poll 回调
     make-poll-callback
 
+    ;; FS Event 回调
+    make-fs-event-callback
+
+    ;; FS Poll 回调
+    make-fs-poll-callback
+
     ;; 错误处理
     handle-callback-error
     )
@@ -305,5 +311,49 @@
              (void* int int) void)])
       (register-c-callback! (cons scheme-proc 'poll) wrapper)
       wrapper))
+
+  ;; FS Event 回调: void (*uv_fs_event_cb)(uv_fs_event_t* handle,
+  ;;                                        const char* filename,
+  ;;                                        int events, int status)
+  (define (make-fs-event-callback scheme-proc)
+    "创建文件系统事件回调"
+    (let ([wrapper
+           (foreign-callable
+             (lambda (handle-ptr filename-ptr events status)
+               (guard (e [else (handle-callback-error e)])
+                 (let ([wrapper (ptr->wrapper handle-ptr)]
+                       [filename (if (= filename-ptr 0)
+                                     #f
+                                     (get-string-from-ptr filename-ptr))])
+                   (when wrapper (scheme-proc wrapper filename events status)))))
+             (void* void* int int) void)])
+      (register-c-callback! (cons scheme-proc 'fs-event) wrapper)
+      wrapper))
+
+  ;; FS Poll 回调: void (*uv_fs_poll_cb)(uv_fs_poll_t* handle,
+  ;;                                      int status,
+  ;;                                      const uv_stat_t* prev,
+  ;;                                      const uv_stat_t* curr)
+  (define (make-fs-poll-callback scheme-proc)
+    "创建文件系统轮询回调"
+    (let ([wrapper
+           (foreign-callable
+             (lambda (handle-ptr status prev-stat-ptr curr-stat-ptr)
+               (guard (e [else (handle-callback-error e)])
+                 (let ([wrapper (ptr->wrapper handle-ptr)])
+                   (when wrapper
+                     (scheme-proc wrapper status prev-stat-ptr curr-stat-ptr)))))
+             (void* int void* void*) void)])
+      (register-c-callback! (cons scheme-proc 'fs-poll) wrapper)
+      wrapper))
+
+  ;; 辅助函数：从 C 字符串指针获取 Scheme 字符串
+  (define (get-string-from-ptr ptr)
+    "从 C 字符串指针获取 Scheme 字符串"
+    (let loop ([i 0] [chars '()])
+      (let ([byte (foreign-ref 'unsigned-8 ptr i)])
+        (if (= byte 0)
+            (list->string (reverse chars))
+            (loop (+ i 1) (cons (integer->char byte) chars))))))
 
 ) ; end library

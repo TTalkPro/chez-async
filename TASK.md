@@ -2,7 +2,7 @@
 
 ## 📊 项目完成度
 
-**当前阶段**: Phase 1-11 完成 (约 90%)
+**当前阶段**: Phase 1-12 完成 (约 95%)
 
 | 类别 | 完成度 | 状态 |
 |------|--------|------|
@@ -19,8 +19,10 @@
 | TTY 终端 | 100% | ✅ 完成 |
 | Poll 轮询 | 100% | ✅ 完成 |
 | Process 进程 | 100% | ✅ 完成 |
-| 其他句柄 | 0% | ⏳ 待实现 |
-| 高层抽象 | 0% | ⏳ 待实现 |
+| 事件循环钩子 | 100% | ✅ 完成 |
+| 文件系统监视 | 100% | ✅ 完成 |
+| Promise/Future | 100% | ✅ 完成 |
+| 高层抽象 | 25% | 🔄 进行中 |
 
 ---
 
@@ -209,6 +211,56 @@
   - [x] `make-process-options` / `free-process-options` - 进程选项管理
 - [x] 测试
   - [x] Process 测试套件 (`tests/test-process.ss`) - 6 个测试
+
+### Phase 12: 其他句柄类型
+
+#### 12.1 事件循环钩子 (Prepare/Check/Idle)
+
+- [x] FFI 绑定
+  - [x] `ffi/prepare.ss` - Prepare 句柄（I/O 轮询前）
+  - [x] `ffi/check.ss` - Check 句柄（I/O 轮询后）
+  - [x] `ffi/idle.ss` - Idle 句柄（空闲时）
+- [x] 低层封装
+  - [x] `low-level/prepare.ss` - `uv-prepare-init`, `uv-prepare-start!`, `uv-prepare-stop!`
+  - [x] `low-level/check.ss` - `uv-check-init`, `uv-check-start!`, `uv-check-stop!`
+  - [x] `low-level/idle.ss` - `uv-idle-init`, `uv-idle-start!`, `uv-idle-stop!`
+- [x] 测试
+  - [x] Loop Hooks 测试套件 (`tests/test-loop-hooks.ss`) - 7 个测试
+
+#### 12.2 文件系统监视 (FS Event/FS Poll)
+
+- [x] FFI 绑定
+  - [x] `ffi/fs-event.ss` - 文件系统事件通知
+  - [x] `ffi/fs-poll.ss` - 文件系统轮询
+- [x] 低层封装
+  - [x] `low-level/fs-event.ss` - `uv-fs-event-init`, `uv-fs-event-start!`, `uv-fs-event-stop!`
+  - [x] `low-level/fs-poll.ss` - `uv-fs-poll-init`, `uv-fs-poll-start!`, `uv-fs-poll-stop!`
+- [x] 测试
+  - [x] FS Watch 测试套件 (`tests/test-fs-watch.ss`) - 6 个测试
+
+### Phase 13.1: Promise/Future API
+
+- [x] Promise 记录类型和状态管理
+- [x] 创建函数
+  - [x] `make-promise` - 创建新 Promise
+  - [x] `promise-resolved` - 创建已成功的 Promise
+  - [x] `promise-rejected` - 创建已失败的 Promise
+- [x] 链式操作
+  - [x] `promise-then` - 添加成功/失败回调
+  - [x] `promise-catch` - 添加失败回调
+  - [x] `promise-finally` - 添加完成回调
+- [x] 组合器
+  - [x] `promise-all` - 等待所有 Promise
+  - [x] `promise-race` - 返回第一个完成的
+  - [x] `promise-any` - 返回第一个成功的
+  - [x] `promise-all-settled` - 等待所有完成
+- [x] 辅助函数
+  - [x] `promise-wait` - 同步等待
+  - [x] 状态查询函数
+- [x] 测试
+  - [x] Promise 测试套件 (`tests/test-promise.ss`) - 13 个测试
+- [x] 示例
+  - [x] `examples/promise-demo.ss` - Promise 使用演示
 
 ---
 
@@ -399,46 +451,9 @@
 
 ---
 
-### Phase 12: 其他句柄类型
+### Phase 12: 其他句柄类型 ✅
 
-#### 12.1 Prepare / Check / Idle
-
-- [ ] **FFI 绑定**
-  - [ ] `ffi/prepare.ss`
-  - [ ] `ffi/check.ss`
-  - [ ] `ffi/idle.ss`
-
-- [ ] **低层封装**
-  - [ ] `low-level/prepare.ss`
-  - [ ] `low-level/check.ss`
-  - [ ] `low-level/idle.ss`
-
-**用途**: 事件循环钩子，用于在事件循环的不同阶段执行回调
-
-**预计工作量**: 1 天
-
-#### 12.2 FS Event (文件系统监视)
-
-- [ ] **FFI 绑定** (`ffi/fs-event.ss`)
-  - [ ] `%ffi-uv-fs-event-init`
-  - [ ] `%ffi-uv-fs-event-start`
-  - [ ] `%ffi-uv-fs-event-stop`
-
-- [ ] **低层封装** (`low-level/fs-event.ss`)
-  - [ ] `uv-fs-event-init`
-  - [ ] `uv-fs-event-start!` / `uv-fs-event-stop!`
-  - [ ] 事件类型（rename, change）
-
-- [ ] **测试和文档**
-
-**预计工作量**: 1-2 天
-
-#### 12.3 FS Poll (定期文件状态检查)
-
-- [ ] **FFI 绑定** (`ffi/fs-poll.ss`)
-- [ ] **低层封装** (`low-level/fs-poll.ss`)
-
-**预计工作量**: 1 天
+*已在 2026-02-04 完成。详见"已完成功能"部分。*
 
 ---
 
