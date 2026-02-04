@@ -106,6 +106,7 @@
 
   (define (uv-loop-close loop)
     "关闭事件循环并释放资源
+     注意：如果有线程池，需要先调用 threadpool-shutdown! 手动关闭
      loop: 要关闭的事件循环"
     (let ([ptr (uv-loop-ptr loop)])
       ;; 从全局注册表注销

@@ -9,6 +9,17 @@
         (chez-async low-level handle-base)
         (chez-async low-level threadpool))
 
+;; 辅助函数（必须在 tests 之前定义）
+(define (string-contains str substr)
+  "检查字符串是否包含子串"
+  (let ([str-len (string-length str)]
+        [sub-len (string-length substr)])
+    (let loop ([i 0])
+      (cond
+        [(> (+ i sub-len) str-len) #f]
+        [(string=? (substring str i (+ i sub-len)) substr) #t]
+        [else (loop (+ i 1))]))))
+
 (test-group "Async Work Tests"
 
   (test "async-handle-create-and-send"
@@ -41,7 +52,10 @@
       (uv-run loop 'default)
       ;; 验证结果
       (assert-equal 6 result "result should be 6")
-      ;; 清理
+      ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
+      (let ([pool (uv-loop-threadpool loop)])
+        (when pool (threadpool-shutdown! pool)))
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-fibonacci"
@@ -60,7 +74,10 @@
       (uv-run loop 'default)
       ;; 验证结果
       (assert-equal 55 result "fib(10) should be 55")
-      ;; 清理
+      ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
+      (let ([pool (uv-loop-threadpool loop)])
+        (when pool (threadpool-shutdown! pool)))
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-error-handling"
@@ -87,7 +104,10 @@
       (assert-true error-called? "error callback should be called")
       (assert-true (string-contains error-msg "intentional")
                    "error message should contain 'intentional'")
-      ;; 清理
+      ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
+      (let ([pool (uv-loop-threadpool loop)])
+        (when pool (threadpool-shutdown! pool)))
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "parallel-async-tasks"
@@ -114,7 +134,10 @@
       (let ([sorted (list-sort < results)])
         (assert-equal '(0 1 4 9 16) sorted
                       "results should be squares of 0-4"))
-      ;; 清理
+      ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
+      (let ([pool (uv-loop-threadpool loop)])
+        (when pool (threadpool-shutdown! pool)))
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "threadpool-custom-size"
@@ -137,6 +160,7 @@
                     "should use custom threadpool")
       ;; 清理
       (threadpool-shutdown! pool)
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-with-data-passing"
@@ -155,7 +179,10 @@
       ;; 验证结果
       (assert-equal '(2 4 6 8 10) output-data
                     "should double all elements")
-      ;; 清理
+      ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
+      (let ([pool (uv-loop-threadpool loop)])
+        (when pool (threadpool-shutdown! pool)))
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-success-handler"
@@ -176,20 +203,12 @@
       ;; 验证
       (assert-true success? "success handler should be called")
       (assert-equal 42 result "result should be 42")
-      ;; 清理
+      ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
+      (let ([pool (uv-loop-threadpool loop)])
+        (when pool (threadpool-shutdown! pool)))
+      (uv-run loop 'once)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
 ) ; end test-group
-
-;; 辅助函数
-(define (string-contains str substr)
-  "检查字符串是否包含子串"
-  (let ([str-len (string-length str)]
-        [sub-len (string-length substr)])
-    (let loop ([i 0])
-      (cond
-        [(> (+ i sub-len) str-len) #f]
-        [(string=? (substring str i (+ i sub-len)) substr) #t]
-        [else (loop (+ i 1))]))))
 
 (run-tests)

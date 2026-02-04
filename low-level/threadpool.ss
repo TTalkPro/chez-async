@@ -234,13 +234,16 @@
       (when (threadpool-running? pool)
         ;; 设置运行标志为 false
         (threadpool-running?-set! pool #f)
-        ;; 等待一小段时间让线程退出
-        (sleep (make-time 'time-duration 100000000 0)) ; 100ms
-        ;; 关闭 async 句柄
+        ;; 等待足够长的时间让线程退出
+        ;; 在 FreeBSD 上，线程调度可能与 Linux 不同，需要更长的等待时间
+        (sleep (make-time 'time-duration 500000000 0)) ; 500ms
+        ;; 关闭 async 句柄（在线程退出之后）
         (let ([async-h (threadpool-async-handle pool)])
           (when async-h
             (uv-handle-close! async-h)
             (threadpool-async-handle-set! pool #f)))
+        ;; 再等待一小段时间确保 async handle 完全关闭
+        (sleep (make-time 'time-duration 100000000 0)) ; 100ms
         ;; 清空任务映射
         (let ([task-map (threadpool-task-map pool)])
           (vector-for-each
