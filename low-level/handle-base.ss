@@ -1,6 +1,10 @@
 ;;; low-level/handle-base.ss - 句柄包装器基础
 ;;;
 ;;; 提供句柄的 Scheme 包装器和资源管理
+;;;
+;;; 设计说明：
+;;; 本模块依赖 internal/loop-registry 进行循环注册操作，
+;;; 避免直接依赖 high-level/event-loop，打破循环依赖。
 
 (library (chez-async low-level handle-base)
   (export
@@ -48,7 +52,7 @@
           (chez-async ffi errors)
           (chez-async ffi handles)
           (chez-async ffi callbacks)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal utils)
           (chez-async internal callback-registry)
           (chez-async internal macros))
@@ -56,6 +60,14 @@
   ;; ========================================
   ;; 句柄包装器记录类型
   ;; ========================================
+  ;;
+  ;; uv-handle-wrapper 记录类型封装 libuv 句柄，提供：
+  ;; - ptr: C 句柄指针
+  ;; - type: 句柄类型符号（'timer, 'tcp, 'udp 等）
+  ;; - loop: 关联的事件循环
+  ;; - scheme-data: 用户数据（被 lock-object 保护）
+  ;; - closed?: 关闭状态标志
+  ;; - close-callback: 关闭时的用户回调
 
   (define-record-type uv-handle-wrapper
     (fields
@@ -80,7 +92,9 @@
   ;; ========================================
 
   (define (allocate-handle size)
-    "分配句柄内存"
+    "分配句柄内存
+     size: 句柄大小（字节）
+     返回: 分配的内存指针"
     (allocate-zeroed size))
 
   (define (store-wrapper-in-handle! loop handle-ptr wrapper)
@@ -92,6 +106,8 @@
 
   (define (get-wrapper-from-handle handle-ptr)
     "从注册表获取包装器对象
+     handle-ptr: 句柄 C 指针
+     返回: 句柄包装器对象，如果未找到则返回 #f
      注意：此函数使用 per-loop 注册表，通过 uv_handle_get_loop 获取 loop"
     (ptr->wrapper handle-ptr))
 
@@ -119,7 +135,8 @@
   ;; ========================================
 
   (define (cleanup-handle-wrapper! wrapper)
-    "清理句柄包装器资源"
+    "清理句柄包装器资源
+     wrapper: 要清理的句柄包装器"
     ;; 解锁 scheme-data
     (let ([data (handle-data wrapper)])
       (when data (unlock-object data)))
@@ -156,7 +173,9 @@
   ;; ========================================
 
   (define (uv-handle-close! wrapper . user-callback)
-    "关闭句柄，确保资源正确释放"
+    "关闭句柄，确保资源正确释放
+     wrapper: 句柄包装器
+     user-callback: 可选的关闭完成回调 (lambda (handle) ...)"
     (unless (handle-closed? wrapper)
       (handle-closed?-set! wrapper #t)
       (when (not (null? user-callback))
@@ -165,23 +184,31 @@
                      (get-close-callback))))
 
   (define (uv-handle-ref! wrapper)
-    "增加句柄引用计数（防止事件循环退出）"
+    "增加句柄引用计数（防止事件循环退出）
+     wrapper: 句柄包装器"
     (%ffi-uv-ref (handle-ptr wrapper)))
 
   (define (uv-handle-unref! wrapper)
-    "减少句柄引用计数（允许事件循环退出）"
+    "减少句柄引用计数（允许事件循环退出）
+     wrapper: 句柄包装器"
     (%ffi-uv-unref (handle-ptr wrapper)))
 
   (define (uv-handle-has-ref? wrapper)
-    "检查句柄是否有引用"
+    "检查句柄是否有引用
+     wrapper: 句柄包装器
+     返回: #t 如果有引用，否则 #f"
     (not (= 0 (%ffi-uv-has-ref (handle-ptr wrapper)))))
 
   (define (uv-handle-active? wrapper)
-    "检查句柄是否活跃"
+    "检查句柄是否活跃
+     wrapper: 句柄包装器
+     返回: #t 如果活跃，否则 #f"
     (not (= 0 (%ffi-uv-is-active (handle-ptr wrapper)))))
 
   (define (uv-handle-closing? wrapper)
-    "检查句柄是否正在关闭"
+    "检查句柄是否正在关闭
+     wrapper: 句柄包装器
+     返回: #t 如果正在关闭，否则 #f"
     (not (= 0 (%ffi-uv-is-closing (handle-ptr wrapper)))))
 
 ) ; end library

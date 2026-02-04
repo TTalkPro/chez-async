@@ -94,63 +94,67 @@
   ;; type 参数使用 uv_handle_type 枚举值
   (define-ffi %ffi-uv-handle-size "uv_handle_size" (int) size_t)
 
-  ;; 以下是各类型句柄大小的便捷函数
-  ;; 使用 uv-handle-type->int 转换类型符号
+  ;; ========================================
+  ;; 各类型句柄大小的便捷函数
+  ;; ========================================
+  ;;
+  ;; 使用 define-handle-size-fn 宏消除重复代码
+  ;; 每个函数返回对应句柄类型的大小（字节）
 
-  (define (%ffi-uv-timer-size)
-    "获取 uv_timer_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'timer)))
+  ;; Timer 句柄大小
+  (define-handle-size-fn %ffi-uv-timer-size timer
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-tcp-size)
-    "获取 uv_tcp_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'tcp)))
+  ;; TCP 句柄大小
+  (define-handle-size-fn %ffi-uv-tcp-size tcp
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-udp-size)
-    "获取 uv_udp_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'udp)))
+  ;; UDP 句柄大小
+  (define-handle-size-fn %ffi-uv-udp-size udp
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-pipe-size)
-    "获取 uv_pipe_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'named-pipe)))
+  ;; Pipe 句柄大小
+  (define-handle-size-fn %ffi-uv-pipe-size named-pipe
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-tty-size)
-    "获取 uv_tty_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'tty)))
+  ;; TTY 句柄大小
+  (define-handle-size-fn %ffi-uv-tty-size tty
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-poll-size)
-    "获取 uv_poll_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'poll)))
+  ;; Poll 句柄大小
+  (define-handle-size-fn %ffi-uv-poll-size poll
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-signal-size)
-    "获取 uv_signal_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'signal)))
+  ;; Signal 句柄大小
+  (define-handle-size-fn %ffi-uv-signal-size signal
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-process-size)
-    "获取 uv_process_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'process)))
+  ;; Process 句柄大小
+  (define-handle-size-fn %ffi-uv-process-size process
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-async-size)
-    "获取 uv_async_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'async)))
+  ;; Async 句柄大小
+  (define-handle-size-fn %ffi-uv-async-size async
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-prepare-size)
-    "获取 uv_prepare_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'prepare)))
+  ;; Prepare 句柄大小
+  (define-handle-size-fn %ffi-uv-prepare-size prepare
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-check-size)
-    "获取 uv_check_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'check)))
+  ;; Check 句柄大小
+  (define-handle-size-fn %ffi-uv-check-size check
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-idle-size)
-    "获取 uv_idle_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'idle)))
+  ;; Idle 句柄大小
+  (define-handle-size-fn %ffi-uv-idle-size idle
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-fs-event-size)
-    "获取 uv_fs_event_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'fs-event)))
+  ;; FS Event 句柄大小
+  (define-handle-size-fn %ffi-uv-fs-event-size fs-event
+    %ffi-uv-handle-size uv-handle-type->int)
 
-  (define (%ffi-uv-fs-poll-size)
-    "获取 uv_fs_poll_t 结构大小"
-    (%ffi-uv-handle-size (uv-handle-type->int 'fs-poll)))
+  ;; FS Poll 句柄大小
+  (define-handle-size-fn %ffi-uv-fs-poll-size fs-poll
+    %ffi-uv-handle-size uv-handle-type->int)
 
 ) ; end library

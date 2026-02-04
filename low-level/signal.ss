@@ -1,19 +1,25 @@
 ;;; low-level/signal.ss - Signal 低层封装
 ;;;
-;;; 提供信号处理的高层封装
+;;; 提供 Unix 信号处理的高层封装
 ;;;
-;;; 用例：
+;;; 使用场景：
 ;;; - 优雅关闭服务器: (uv-signal-start! sig SIGTERM (lambda (sig signum) ...))
 ;;; - 热重载配置: (uv-signal-start! sig SIGHUP reload-config)
 ;;; - 子进程监控: (uv-signal-start! sig SIGCHLD handle-child-exit)
+;;; - 中断处理: (uv-signal-start! sig SIGINT graceful-shutdown)
+;;;
+;;; 注意事项：
+;;; - 信号处理是异步的，回调在事件循环中执行
+;;; - 同一信号可以有多个处理器（多个 signal 句柄）
+;;; - Windows 上只支持部分信号（SIGINT, SIGBREAK 等）
 
 (library (chez-async low-level signal)
   (export
     ;; Signal 创建和控制
-    uv-signal-init
-    uv-signal-start!
-    uv-signal-start-oneshot!
-    uv-signal-stop!
+    uv-signal-init           ; 初始化信号句柄
+    uv-signal-start!         ; 开始监听信号
+    uv-signal-start-oneshot! ; 一次性监听信号
+    uv-signal-stop!          ; 停止监听信号
 
     ;; 信号常量（从 ffi/signal.ss 重新导出）
     SIGINT SIGTERM SIGHUP SIGQUIT SIGABRT SIGALRM
@@ -21,7 +27,7 @@
     SIGCONT SIGTSTP SIGBREAK
 
     ;; 辅助函数
-    signum->name
+    signum->name             ; 信号编号转名称
     )
   (import (chezscheme)
           (chez-async ffi types)
@@ -39,7 +45,9 @@
   ;; 全局 Signal 回调
   ;; ========================================
   ;;
-  ;; 使用统一回调注册表管理信号回调
+  ;; 使用统一回调注册表管理信号回调。
+  ;; 回调签名：void (*uv_signal_cb)(uv_signal_t* handle, int signum)
+  ;; 当信号触发时，libuv 调用此回调，传入句柄指针和信号编号。
 
   (define-registered-callback get-signal-callback CALLBACK-SIGNAL
     (lambda ()
@@ -54,7 +62,13 @@
   ;; ========================================
 
   (define (signum->name signum)
-    "将信号编号转换为名称字符串"
+    "将信号编号转换为名称字符串
+
+     参数：
+       signum - 信号编号
+
+     返回：
+       信号名称字符串（如 \"SIGINT\", \"SIGTERM\"）"
     (case signum
       [(1)  "SIGHUP"]
       [(2)  "SIGINT"]
@@ -77,8 +91,17 @@
   ;; ========================================
 
   (define (uv-signal-init loop)
-    "创建信号句柄
-     loop: 事件循环"
+    "初始化信号句柄
+
+     参数：
+       loop - 事件循环对象
+
+     返回：
+       新创建的信号句柄包装器
+
+     说明：
+       信号句柄初始化后处于停止状态。
+       使用完毕后必须调用 uv-handle-close! 释放资源。"
     (let* ([size (%ffi-uv-signal-size)]
            [ptr (allocate-handle size)]
            [loop-ptr (uv-loop-ptr loop)])
@@ -93,9 +116,15 @@
 
   (define (uv-signal-start! signal signum callback)
     "开始监听指定信号
-     signal: 信号句柄
-     signum: 信号编号（如 SIGINT, SIGTERM）
-     callback: 回调函数 (lambda (signal signum) ...)"
+
+     参数：
+       signal   - 信号句柄
+       signum   - 信号编号（如 SIGINT, SIGTERM）
+       callback - 回调函数 (lambda (signal signum) ...)
+
+     说明：
+       每次收到信号时都会调用回调。
+       要停止监听，调用 uv-signal-stop! 或 uv-handle-close!。"
     (with-handle-check signal uv-signal-start!
       ;; 保存用户回调
       (handle-data-set! signal callback)
@@ -107,10 +136,16 @@
                               signum))))
 
   (define (uv-signal-start-oneshot! signal signum callback)
-    "一次性监听指定信号（触发一次后自动停止）
-     signal: 信号句柄
-     signum: 信号编号
-     callback: 回调函数 (lambda (signal signum) ...)"
+    "一次性监听指定信号
+
+     参数：
+       signal   - 信号句柄
+       signum   - 信号编号
+       callback - 回调函数 (lambda (signal signum) ...)
+
+     说明：
+       信号触发一次后自动停止监听。
+       适用于只需要处理一次的场景（如优雅关闭）。"
     (with-handle-check signal uv-signal-start-oneshot!
       ;; 保存用户回调
       (handle-data-set! signal callback)
@@ -123,7 +158,13 @@
 
   (define (uv-signal-stop! signal)
     "停止监听信号
-     signal: 信号句柄"
+
+     参数：
+       signal - 信号句柄
+
+     说明：
+       停止后可以通过 uv-signal-start! 重新开始监听。
+       停止会清理之前注册的回调。"
     (with-handle-check signal uv-signal-stop!
       (with-uv-check uv-signal-stop
         (%ffi-uv-signal-stop (handle-ptr signal)))

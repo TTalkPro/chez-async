@@ -2,40 +2,46 @@
 ;;;
 ;;; 提供进程启动和管理的高层封装
 ;;;
+;;; 功能：
+;;; - 启动子进程（支持参数、环境变量、工作目录）
+;;; - 进程退出监控（异步回调通知）
+;;; - 向进程发送信号
+;;;
 ;;; 设计说明：
 ;;; - uv_process_options_t 结构较复杂，需要手动构建
 ;;; - 支持 stdio 重定向到管道
 ;;; - 进程退出时自动清理资源
+;;; - 使用统一回调注册系统管理退出回调
 
 (library (chez-async low-level process)
   (export
     ;; 进程创建
-    uv-spawn
+    uv-spawn                 ; 启动子进程
 
     ;; 进程操作
-    uv-process-kill!
-    uv-process-get-pid
+    uv-process-kill!         ; 向进程发送信号
+    uv-process-get-pid       ; 获取进程 PID
 
     ;; 全局进程函数
-    uv-kill
+    uv-kill                  ; 向任意进程发送信号
 
-    ;; 常量导出
-    UV_PROCESS_SETUID
-    UV_PROCESS_SETGID
-    UV_PROCESS_DETACHED
-    UV_PROCESS_WINDOWS_HIDE
+    ;; 进程标志常量
+    UV_PROCESS_SETUID        ; 设置用户 ID
+    UV_PROCESS_SETGID        ; 设置组 ID
+    UV_PROCESS_DETACHED      ; 分离进程
+    UV_PROCESS_WINDOWS_HIDE  ; Windows 上隐藏窗口
 
     ;; stdio 标志
-    UV_IGNORE
-    UV_CREATE_PIPE
-    UV_INHERIT_FD
-    UV_INHERIT_STREAM
-    UV_READABLE_PIPE
-    UV_WRITABLE_PIPE
+    UV_IGNORE                ; 忽略 stdio
+    UV_CREATE_PIPE           ; 创建管道
+    UV_INHERIT_FD            ; 继承文件描述符
+    UV_INHERIT_STREAM        ; 继承流
+    UV_READABLE_PIPE         ; 可读管道
+    UV_WRITABLE_PIPE         ; 可写管道
 
     ;; 辅助函数
-    make-process-options
-    free-process-options
+    make-process-options     ; 创建进程选项
+    free-process-options     ; 释放进程选项
     )
   (import (chezscheme)
           (chez-async ffi types)
@@ -53,12 +59,23 @@
   ;; ========================================
   ;; 进程退出回调
   ;; ========================================
-
-  ;; 注册进程退出回调类型（如果尚未定义）
-  ;; void (*uv_exit_cb)(uv_process_t* handle, int64_t exit_status, int term_signal)
+  ;;
+  ;; 使用统一回调注册系统管理进程退出回调。
+  ;; 回调签名：void (*uv_exit_cb)(uv_process_t* handle, int64_t exit_status, int term_signal)
+  ;;
+  ;; 参数说明：
+  ;; - handle: 进程句柄指针
+  ;; - exit_status: 退出状态码（进程主动退出时有效）
+  ;; - term_signal: 终止信号（被信号终止时有效）
 
   (define (make-exit-callback scheme-proc)
-    "创建进程退出回调"
+    "创建进程退出回调
+
+     参数：
+       scheme-proc - Scheme 回调过程 (lambda (wrapper exit-status term-signal) ...)
+
+     返回：
+       foreign-callable 对象"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr exit-status term-signal)
@@ -70,27 +87,22 @@
       (register-c-callback! (cons scheme-proc 'exit) wrapper)
       wrapper))
 
-  ;; 全局退出回调
-  (define *exit-callback* #f)
-
-  (define (get-exit-callback)
-    "获取全局退出回调（延迟创建）"
-    (unless *exit-callback*
-      (set! *exit-callback*
-        (make-exit-callback
-          (lambda (wrapper exit-status term-signal)
-            (let ([user-callback (handle-data wrapper)])
-              ;; 调用用户回调
-              (when (and user-callback (procedure? user-callback))
-                (user-callback wrapper exit-status term-signal))
-              ;; 进程结束后自动关闭句柄
-              (uv-handle-close! wrapper))))))
-    (foreign-callable-entry-point *exit-callback*))
+  ;; 使用统一回调注册表管理退出回调
+  (define-registered-callback get-exit-callback CALLBACK-PROCESS-EXIT
+    (lambda ()
+      (make-exit-callback
+        (lambda (wrapper exit-status term-signal)
+          (let ([user-callback (handle-data wrapper)])
+            ;; 调用用户回调
+            (when (and user-callback (procedure? user-callback))
+              (user-callback wrapper exit-status term-signal))
+            ;; 进程结束后自动关闭句柄
+            (uv-handle-close! wrapper))))))
 
   ;; ========================================
   ;; 进程选项构建
   ;; ========================================
-
+  ;;
   ;; uv_process_options_t 结构布局（64位系统）:
   ;; offset 0:  exit_cb (void*)
   ;; offset 8:  file (char*)
@@ -106,7 +118,13 @@
   ;; offset 68: gid (uv_gid_t)
 
   (define (string->c-string str)
-    "将 Scheme 字符串转换为 C 字符串（malloc 分配）"
+    "将 Scheme 字符串转换为 C 字符串
+
+     参数：
+       str - Scheme 字符串
+
+     返回：
+       malloc 分配的 C 字符串指针（需要手动释放）"
     (let* ([bv (string->utf8 str)]
            [len (bytevector-length bv)]
            [ptr (foreign-alloc (+ len 1))])
@@ -117,7 +135,15 @@
       ptr))
 
   (define (strings->c-string-array strs)
-    "将字符串列表转换为 C 字符串数组（NULL 结尾）"
+    "将字符串列表转换为 C 字符串数组
+
+     参数：
+       strs - Scheme 字符串列表
+
+     返回：
+       (array-ptr . c-strings) 的 cons
+       array-ptr: NULL 结尾的 C 字符串数组指针
+       c-strings: 各字符串的 C 指针列表"
     (let* ([count (length strs)]
            [array-ptr (foreign-alloc (* (+ count 1) (foreign-sizeof 'void*)))]
            [c-strings (map string->c-string strs)])
@@ -142,13 +168,19 @@
        (make-process-options file args cwd env flags 0 0)]
       [(file args cwd env flags uid gid)
        "创建进程选项结构
-        file: 可执行文件路径
-        args: 参数列表（第一个应该是程序名）
-        cwd: 工作目录（可选）
-        env: 环境变量列表（可选，格式 '(\"KEY=VALUE\" ...)）
-        flags: 进程标志（可选）
-        uid/gid: 用户/组 ID（需要 UV_PROCESS_SETUID/GID 标志）
-        返回: (options-ptr . cleanup-data)"
+
+        参数：
+          file  - 可执行文件路径
+          args  - 参数列表（第一个应该是程序名）
+          cwd   - 工作目录（可选，#f 使用当前目录）
+          env   - 环境变量列表（可选，格式 '(\"KEY=VALUE\" ...)）
+          flags - 进程标志（可选）
+          uid   - 用户 ID（需要 UV_PROCESS_SETUID 标志）
+          gid   - 组 ID（需要 UV_PROCESS_SETGID 标志）
+
+        返回：
+          (options-ptr file-ptr args-ptr args-strings cwd-ptr env-ptr env-strings)
+          需要调用 free-process-options 释放"
     (let* ([opts-size (%ffi-uv-process-options-size)]
            [opts-ptr (allocate-zeroed opts-size)]
            [file-ptr (string->c-string file)]
@@ -179,7 +211,10 @@
             env-ptr env-strings))]))
 
   (define (free-process-options opts-data)
-    "释放进程选项结构及相关内存"
+    "释放进程选项结构及相关内存
+
+     参数：
+       opts-data - make-process-options 返回的列表"
     (let ([opts-ptr (list-ref opts-data 0)]
           [file-ptr (list-ref opts-data 1)]
           [args-ptr (list-ref opts-data 2)]
@@ -213,14 +248,22 @@
        (uv-spawn loop file args callback cwd env 0)]
       [(loop file args callback cwd env flags)
        "启动子进程
-        loop: 事件循环
-        file: 可执行文件路径
-        args: 参数列表（不包括程序名，会自动添加）
-        callback: 退出回调 (lambda (process exit-status term-signal) ...)
-        cwd: 工作目录（可选）
-        env: 环境变量列表（可选）
-        flags: 进程标志（可选）
-        返回: process 句柄"
+
+        参数：
+          loop     - 事件循环对象
+          file     - 可执行文件路径
+          args     - 参数列表（不包括程序名，会自动添加）
+          callback - 退出回调 (lambda (process exit-status term-signal) ...)
+          cwd      - 工作目录（可选，#f 使用当前目录）
+          env      - 环境变量列表（可选）
+          flags    - 进程标志（可选）
+
+        返回：
+          进程句柄包装器
+
+        说明：
+          进程退出时会自动关闭句柄。
+          exit-status 是进程退出码，term-signal 是终止信号（0 表示正常退出）。"
        ;; 分配进程句柄
        (let* ([size (%ffi-uv-process-size)]
               [ptr (allocate-handle size)]
@@ -251,9 +294,15 @@
              wrapper)))]))
 
   (define (uv-process-kill! process signum)
-    "发送信号给进程
-     process: 进程句柄
-     signum: 信号编号"
+    "向进程发送信号
+
+     参数：
+       process - 进程句柄
+       signum  - 信号编号（如 SIGTERM, SIGKILL）
+
+     说明：
+       只能向通过 uv-spawn 启动的进程发送信号。
+       信号发送是同步的，但进程处理是异步的。"
     (when (handle-closed? process)
       (error 'uv-process-kill! "process handle is closed"))
     (with-uv-check uv-process-kill
@@ -261,16 +310,26 @@
 
   (define (uv-process-get-pid process)
     "获取进程 PID
-     process: 进程句柄
-     返回: 进程 ID"
+
+     参数：
+       process - 进程句柄
+
+     返回：
+       进程 ID（整数）"
     (when (handle-closed? process)
       (error 'uv-process-get-pid "process handle is closed"))
     (%ffi-uv-process-get-pid (handle-ptr process)))
 
   (define (uv-kill pid signum)
-    "发送信号给任意进程
-     pid: 目标进程 ID
-     signum: 信号编号"
+    "向任意进程发送信号
+
+     参数：
+       pid    - 目标进程 ID
+       signum - 信号编号
+
+     说明：
+       可以向任何进程发送信号（需要权限）。
+       不需要通过 uv-spawn 启动的进程。"
     (with-uv-check uv-kill
       (%ffi-uv-kill pid signum)))
 

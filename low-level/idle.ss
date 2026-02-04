@@ -1,13 +1,14 @@
 ;;; low-level/idle.ss - Idle 句柄低层封装
 ;;;
 ;;; Idle 句柄在事件循环空闲时运行回调。
-;;; 注意：当 Idle 句柄活跃时，事件循环会在每次迭代都调用回调，
+;;;
+;;; 警告：当 Idle 句柄活跃时，事件循环会在每次迭代都调用回调，
 ;;; 这会阻止事件循环进入睡眠状态，增加 CPU 使用率。
 ;;;
 ;;; 事件循环阶段顺序：
 ;;; 1. Timers（定时器到期）
 ;;; 2. Pending callbacks（上一轮延迟的 I/O 回调）
-;;; 3. Idle handlers ← 这里
+;;; 3. Idle handlers <- 这里执行
 ;;; 4. Prepare handlers
 ;;; 5. Poll for I/O
 ;;; 6. Check handlers
@@ -17,12 +18,13 @@
 ;;; - 执行低优先级的后台任务
 ;;; - 在事件之间进行垃圾回收
 ;;; - 实现协作式多任务
+;;; - 在空闲时更新 UI
 
 (library (chez-async low-level idle)
   (export
-    uv-idle-init
-    uv-idle-start!
-    uv-idle-stop!
+    uv-idle-init             ; 初始化 Idle 句柄
+    uv-idle-start!           ; 启动 Idle 句柄
+    uv-idle-stop!            ; 停止 Idle 句柄
     )
   (import (chezscheme)
           (chez-async ffi errors)
@@ -38,6 +40,10 @@
   ;; ========================================
   ;; Idle 回调处理
   ;; ========================================
+  ;;
+  ;; 使用统一回调注册表管理 Idle 回调。
+  ;; 回调签名：void (*uv_idle_cb)(uv_idle_t* handle)
+  ;; 注意：使用 make-timer-callback 因为签名相同。
 
   (define-registered-callback get-idle-callback CALLBACK-IDLE
     (lambda ()
@@ -52,9 +58,17 @@
   ;; ========================================
 
   (define (uv-idle-init loop)
-    "初始化 idle 句柄
-     loop: 事件循环
-     返回: idle 句柄包装器"
+    "初始化 Idle 句柄
+
+     参数：
+       loop - 事件循环对象
+
+     返回：
+       新创建的 Idle 句柄包装器
+
+     说明：
+       Idle 句柄初始化后处于停止状态。
+       使用完毕后必须调用 uv-handle-close! 释放资源。"
     (let* ([size (%ffi-uv-idle-size)]
            [ptr (allocate-handle size)]
            [loop-ptr (uv-loop-ptr loop)])
@@ -65,12 +79,19 @@
         (make-handle ptr 'idle loop))))
 
   (define (uv-idle-start! idle callback)
-    "启动 idle 句柄
-     idle: idle 句柄包装器
-     callback: 回调函数 (lambda (idle) ...)
+    "启动 Idle 句柄
 
-     警告：Idle 回调会在每次事件循环迭代时调用，
-     可能导致高 CPU 使用率。确保在适当时候停止。"
+     参数：
+       idle     - Idle 句柄包装器
+       callback - 回调函数 (lambda (idle) ...)
+
+     警告：
+       Idle 回调会在每次事件循环迭代时调用，
+       可能导致高 CPU 使用率。确保在适当时候停止。
+
+     说明：
+       回调应该执行简短的操作，避免阻塞。
+       可以在回调中调用 uv-idle-stop! 来停止自己。"
     (when (handle-closed? idle)
       (error 'uv-idle-start! "idle handle is closed"))
     ;; 保存用户回调
@@ -84,8 +105,14 @@
                           (get-idle-callback))))
 
   (define (uv-idle-stop! idle)
-    "停止 idle 句柄
-     idle: idle 句柄包装器"
+    "停止 Idle 句柄
+
+     参数：
+       idle - Idle 句柄包装器
+
+     说明：
+       停止后回调将不再被调用。
+       可以通过 uv-idle-start! 重新启动。"
     (when (handle-closed? idle)
       (error 'uv-idle-stop! "idle handle is closed"))
     (with-uv-check uv-idle-stop

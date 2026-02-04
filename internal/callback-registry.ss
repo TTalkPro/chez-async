@@ -70,6 +70,9 @@
     ;; 文件系统监视回调
     CALLBACK-FS-EVENT           ; FS Event 回调
     CALLBACK-FS-POLL            ; FS Poll 回调
+
+    ;; 进程回调
+    CALLBACK-PROCESS-EXIT       ; 进程退出回调
     )
   (import (chezscheme))
 
@@ -123,6 +126,9 @@
   ;; 文件系统监视回调类型
   (define CALLBACK-FS-EVENT     'fs-event)
   (define CALLBACK-FS-POLL      'fs-poll)
+
+  ;; 进程回调类型
+  (define CALLBACK-PROCESS-EXIT 'process-exit)
 
   ;; ========================================
   ;; 内部数据结构

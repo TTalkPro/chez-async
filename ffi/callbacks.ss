@@ -15,8 +15,12 @@
 ;;;    - 自动注册到 GC 保护注册表
 ;;;
 ;;; 设计说明：
-;;; 指针-包装器映射已移至 per-loop 注册表（在 high-level/event-loop.ss），
-;;; 避免了全局变量。查找流程：handle-ptr → loop-ptr → loop → wrapper
+;;; 指针-包装器映射已移至 per-loop 注册表（在 internal/loop-registry.ss），
+;;; 避免了全局变量。查找流程：handle-ptr -> loop-ptr -> loop -> wrapper
+;;;
+;;; 依赖说明：
+;;; 此模块仅依赖 internal/loop-registry，不依赖 high-level/event-loop，
+;;; 避免了循环依赖问题。
 
 (library (chez-async ffi callbacks)
   (export
@@ -66,7 +70,7 @@
   (import (chezscheme)
           (chez-async ffi errors)
           (chez-async ffi handles)
-          (chez-async high-level event-loop))
+          (chez-async internal loop-registry))
 
   ;; ========================================
   ;; GC 保护注册表
@@ -100,7 +104,8 @@
   ;; ========================================
 
   (define (handle-callback-error e)
-    "在回调中处理异常"
+    "在回调中处理异常
+     e: 异常对象"
     (fprintf (current-error-port)
              "Error in libuv callback: ~a~n"
              (if (condition? e)
@@ -115,7 +120,7 @@
   ;; 分两种情况处理：
   ;;
   ;; 1. 句柄（Handles）：使用 per-loop 注册表
-  ;;    handle-ptr → uv_handle_get_loop → loop-ptr → loop → wrapper
+  ;;    handle-ptr -> uv_handle_get_loop -> loop-ptr -> loop -> wrapper
   ;;    优点：无全局变量，多个 loop 互不影响
   ;;
   ;; 2. 请求（Requests）：使用小的全局注册表
@@ -126,15 +131,20 @@
   (define *request-registry* (make-eqv-hashtable))
 
   (define (register-request-wrapper! ptr wrapper)
-    "注册请求包装器（全局注册表）"
+    "注册请求包装器（全局注册表）
+     ptr: 请求的 C 指针
+     wrapper: 请求包装器对象"
     (hashtable-set! *request-registry* ptr wrapper))
 
   (define (unregister-request-wrapper! ptr)
-    "注销请求包装器"
+    "注销请求包装器
+     ptr: 请求的 C 指针"
     (hashtable-delete! *request-registry* ptr))
 
   (define (request-ptr->wrapper ptr)
-    "从请求 C 指针获取包装器"
+    "从请求 C 指针获取包装器
+     ptr: 请求的 C 指针
+     返回: 请求包装器对象，如果未找到则返回 #f"
     (hashtable-ref *request-registry* ptr #f))
 
   (define (ptr->wrapper handle-ptr)
@@ -155,12 +165,13 @@
   ;; 通用回调包装器
   (define (make-generic-callback scheme-proc signature)
     "创建通用回调包装器
+     scheme-proc: Scheme 回调过程
      signature: 回调的参数签名
        - (void*): 单个句柄指针参数（timer, close）- 使用 ptr->wrapper
        - (void* int request): 请求指针 + 状态码（write, connect）- 使用 request-ptr->wrapper
        - (void* ssize_t void*): 流指针 + 读取字节数 + 缓冲区（read）- 使用 ptr->wrapper
        - (void* int connection): 连接监听回调 - 使用 ptr->wrapper
-     "
+     返回: foreign-callable 对象"
     (let ([wrapper
            (case signature
              ;; 单个句柄指针参数 (timer, close, idle, prepare, check, etc.)
@@ -210,17 +221,20 @@
 
   ;; close 回调: void (*uv_close_cb)(uv_handle_t* handle)
   (define (make-close-callback scheme-proc)
-    "创建关闭回调"
+    "创建关闭回调
+     scheme-proc: 回调过程 (lambda (wrapper) ...)"
     (make-generic-callback scheme-proc '(void*)))
 
   ;; timer 回调: void (*uv_timer_cb)(uv_timer_t* handle)
   (define (make-timer-callback scheme-proc)
-    "创建定时器回调"
+    "创建定时器回调
+     scheme-proc: 回调过程 (lambda (wrapper) ...)"
     (make-generic-callback scheme-proc '(void*)))
 
   ;; alloc 回调: void (*uv_alloc_cb)(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
   (define (make-alloc-callback scheme-proc)
-    "创建内存分配回调"
+    "创建内存分配回调
+     scheme-proc: 回调过程 (lambda (wrapper suggested-size buf-ptr) ...)"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr suggested-size buf-ptr)
@@ -233,41 +247,48 @@
 
   ;; read 回调: void (*uv_read_cb)(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
   (define (make-read-callback scheme-proc)
-    "创建读取回调"
+    "创建读取回调
+     scheme-proc: 回调过程 (lambda (wrapper nread buf-ptr) ...)"
     (make-generic-callback scheme-proc '(void* ssize_t void*)))
 
   ;; write 回调: void (*uv_write_cb)(uv_write_t* req, int status)
   ;; 使用请求注册表
   (define (make-write-callback scheme-proc)
-    "创建写入回调"
+    "创建写入回调
+     scheme-proc: 回调过程 (lambda (wrapper status) ...)"
     (make-generic-callback scheme-proc '(void* int request)))
 
   ;; connect 回调: void (*uv_connect_cb)(uv_connect_t* req, int status)
   ;; 使用请求注册表
   (define (make-connect-callback scheme-proc)
-    "创建连接回调"
+    "创建连接回调
+     scheme-proc: 回调过程 (lambda (wrapper status) ...)"
     (make-generic-callback scheme-proc '(void* int request)))
 
   ;; shutdown 回调: void (*uv_shutdown_cb)(uv_shutdown_t* req, int status)
   ;; 使用请求注册表
   (define (make-shutdown-callback scheme-proc)
-    "创建关闭流回调"
+    "创建关闭流回调
+     scheme-proc: 回调过程 (lambda (wrapper status) ...)"
     (make-generic-callback scheme-proc '(void* int request)))
 
   ;; connection 回调: void (*uv_connection_cb)(uv_stream_t* server, int status)
   (define (make-connection-callback scheme-proc)
-    "创建连接监听回调"
+    "创建连接监听回调
+     scheme-proc: 回调过程 (lambda (wrapper status) ...)"
     (make-generic-callback scheme-proc '(void* int connection)))
 
   ;; async 回调: void (*uv_async_cb)(uv_async_t* handle)
   (define (make-async-callback scheme-proc)
-    "创建异步唤醒回调"
+    "创建异步唤醒回调
+     scheme-proc: 回调过程 (lambda (wrapper) ...)"
     (make-generic-callback scheme-proc '(void*)))
 
   ;; UDP send 回调: void (*uv_udp_send_cb)(uv_udp_send_t* req, int status)
   ;; 使用请求注册表
   (define (make-udp-send-callback scheme-proc)
-    "创建 UDP 发送回调"
+    "创建 UDP 发送回调
+     scheme-proc: 回调过程 (lambda (wrapper status) ...)"
     (make-generic-callback scheme-proc '(void* int request)))
 
   ;; UDP recv 回调: void (*uv_udp_recv_cb)(uv_udp_t* handle, ssize_t nread,
@@ -275,7 +296,8 @@
   ;;                                        const struct sockaddr* addr,
   ;;                                        unsigned flags)
   (define (make-udp-recv-callback scheme-proc)
-    "创建 UDP 接收回调"
+    "创建 UDP 接收回调
+     scheme-proc: 回调过程 (lambda (wrapper nread buf-ptr addr-ptr flags) ...)"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr nread buf-ptr addr-ptr flags)
@@ -288,7 +310,8 @@
 
   ;; Signal 回调: void (*uv_signal_cb)(uv_signal_t* handle, int signum)
   (define (make-signal-callback scheme-proc)
-    "创建信号处理回调"
+    "创建信号处理回调
+     scheme-proc: 回调过程 (lambda (wrapper signum) ...)"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr signum)
@@ -301,7 +324,8 @@
 
   ;; Poll 回调: void (*uv_poll_cb)(uv_poll_t* handle, int status, int events)
   (define (make-poll-callback scheme-proc)
-    "创建轮询回调"
+    "创建轮询回调
+     scheme-proc: 回调过程 (lambda (wrapper status events) ...)"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr status events)
@@ -316,7 +340,8 @@
   ;;                                        const char* filename,
   ;;                                        int events, int status)
   (define (make-fs-event-callback scheme-proc)
-    "创建文件系统事件回调"
+    "创建文件系统事件回调
+     scheme-proc: 回调过程 (lambda (wrapper filename events status) ...)"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr filename-ptr events status)
@@ -335,7 +360,8 @@
   ;;                                      const uv_stat_t* prev,
   ;;                                      const uv_stat_t* curr)
   (define (make-fs-poll-callback scheme-proc)
-    "创建文件系统轮询回调"
+    "创建文件系统轮询回调
+     scheme-proc: 回调过程 (lambda (wrapper status prev-stat-ptr curr-stat-ptr) ...)"
     (let ([wrapper
            (foreign-callable
              (lambda (handle-ptr status prev-stat-ptr curr-stat-ptr)
@@ -347,9 +373,14 @@
       (register-c-callback! (cons scheme-proc 'fs-poll) wrapper)
       wrapper))
 
-  ;; 辅助函数：从 C 字符串指针获取 Scheme 字符串
+  ;; ========================================
+  ;; 辅助函数
+  ;; ========================================
+
   (define (get-string-from-ptr ptr)
-    "从 C 字符串指针获取 Scheme 字符串"
+    "从 C 字符串指针获取 Scheme 字符串
+     ptr: C 字符串指针（NULL 结尾）
+     返回: Scheme 字符串"
     (let loop ([i 0] [chars '()])
       (let ([byte (foreign-ref 'unsigned-8 ptr i)])
         (if (= byte 0)

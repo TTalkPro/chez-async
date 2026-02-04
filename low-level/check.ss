@@ -8,14 +8,20 @@
 ;;; 3. Idle handlers（空闲处理器）
 ;;; 4. Prepare handlers
 ;;; 5. Poll for I/O
-;;; 6. Check handlers ← 这里
+;;; 6. Check handlers <- 这里执行
 ;;; 7. Close callbacks
+;;;
+;;; 典型用例：
+;;; - 在 I/O 轮询后执行清理工作
+;;; - 处理需要在 I/O 完成后立即执行的任务
+;;; - 性能监控（记录轮询后时间戳）
+;;; - 与 Prepare 配合实现精确计时
 
 (library (chez-async low-level check)
   (export
-    uv-check-init
-    uv-check-start!
-    uv-check-stop!
+    uv-check-init            ; 初始化 Check 句柄
+    uv-check-start!          ; 启动 Check 句柄
+    uv-check-stop!           ; 停止 Check 句柄
     )
   (import (chezscheme)
           (chez-async ffi errors)
@@ -31,6 +37,10 @@
   ;; ========================================
   ;; Check 回调处理
   ;; ========================================
+  ;;
+  ;; 使用统一回调注册表管理 Check 回调。
+  ;; 回调签名：void (*uv_check_cb)(uv_check_t* handle)
+  ;; 注意：使用 make-timer-callback 因为签名相同。
 
   (define-registered-callback get-check-callback CALLBACK-CHECK
     (lambda ()
@@ -45,9 +55,17 @@
   ;; ========================================
 
   (define (uv-check-init loop)
-    "初始化 check 句柄
-     loop: 事件循环
-     返回: check 句柄包装器"
+    "初始化 Check 句柄
+
+     参数：
+       loop - 事件循环对象
+
+     返回：
+       新创建的 Check 句柄包装器
+
+     说明：
+       Check 句柄初始化后处于停止状态。
+       使用完毕后必须调用 uv-handle-close! 释放资源。"
     (let* ([size (%ffi-uv-check-size)]
            [ptr (allocate-handle size)]
            [loop-ptr (uv-loop-ptr loop)])
@@ -58,9 +76,15 @@
         (make-handle ptr 'check loop))))
 
   (define (uv-check-start! check callback)
-    "启动 check 句柄
-     check: check 句柄包装器
-     callback: 回调函数 (lambda (check) ...)"
+    "启动 Check 句柄
+
+     参数：
+       check    - Check 句柄包装器
+       callback - 回调函数 (lambda (check) ...)
+
+     说明：
+       回调在每次 I/O 轮询后执行。
+       回调应该执行快速操作，避免阻塞。"
     (when (handle-closed? check)
       (error 'uv-check-start! "check handle is closed"))
     ;; 保存用户回调
@@ -74,8 +98,14 @@
                            (get-check-callback))))
 
   (define (uv-check-stop! check)
-    "停止 check 句柄
-     check: check 句柄包装器"
+    "停止 Check 句柄
+
+     参数：
+       check - Check 句柄包装器
+
+     说明：
+       停止后回调将不再被调用。
+       可以通过 uv-check-start! 重新启动。"
     (when (handle-closed? check)
       (error 'uv-check-stop! "check handle is closed"))
     (with-uv-check uv-check-stop

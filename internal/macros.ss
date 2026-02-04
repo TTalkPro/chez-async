@@ -6,6 +6,7 @@
 ;;; - 资源管理宏
 ;;; - 回调工厂宏（使用统一注册表）
 ;;; - 请求操作宏
+;;; - 句柄操作宏（新增）
 ;;;
 ;;; 设计原则：
 ;;; 1. 宏应该简化常见模式，而不是隐藏复杂性
@@ -17,6 +18,7 @@
     ;; FFI 绑定宏
     define-ffi
     define-ffi-size
+    define-handle-size-fn    ; 新增：句柄大小函数宏
 
     ;; 错误处理宏
     with-uv-check
@@ -30,6 +32,12 @@
     ;; 回调宏
     define-c-callback
     define-registered-callback
+
+    ;; 句柄操作宏（新增）
+    define-handle-init       ; 句柄初始化宏
+    define-handle-start!     ; 句柄启动宏
+    define-handle-stop!      ; 句柄停止宏
+    call-user-callback-with-error  ; 错误回调辅助宏
 
     ;; 请求操作宏
     with-uv-request
@@ -76,6 +84,28 @@
       [(_ name c-name)
        (define (name)
          ((foreign-procedure c-name () size_t)))]))
+
+  ;; ========================================
+  ;; 句柄大小函数宏（新增）
+  ;; ========================================
+  ;;
+  ;; define-handle-size-fn: 生成句柄大小查询函数
+  ;;
+  ;; 消除 ffi/handles.ss 中 14 个相似的大小查询函数
+  ;;
+  ;; 用法：
+  ;;   (define-handle-size-fn %ffi-uv-timer-size timer)
+  ;;
+  ;; 展开为：
+  ;;   (define (%ffi-uv-timer-size)
+  ;;     "获取 uv_timer_t 结构大小"
+  ;;     (%ffi-uv-handle-size (uv-handle-type->int 'timer)))
+
+  (define-syntax define-handle-size-fn
+    (syntax-rules ()
+      [(_ fn-name type-symbol handle-size-fn type->int-fn)
+       (define (fn-name)
+         (handle-size-fn (type->int-fn 'type-symbol)))]))
 
   ;; ========================================
   ;; 错误处理宏
@@ -211,6 +241,133 @@
            (register-lazy-callback! callback-key factory-thunk))
          ;; 获取回调入口点
          (get-callback-entry-point callback-key))]))
+
+  ;; ========================================
+  ;; 句柄操作宏（新增）
+  ;; ========================================
+  ;;
+  ;; 这些宏用于减少 low-level 模块中的重复代码模式
+
+  ;; define-handle-init: 句柄初始化宏
+  ;;
+  ;; 消除重复的句柄初始化模式（~50 实例）
+  ;;
+  ;; 用法：
+  ;;   (define-handle-init init-name handle-type size-fn ffi-init-fn)
+  ;;
+  ;; 展开为标准的句柄初始化函数：
+  ;;   (define (init-name loop)
+  ;;     (let* ([size (size-fn)]
+  ;;            [ptr (allocate-handle size)]
+  ;;            [loop-ptr (uv-loop-ptr loop)])
+  ;;       (with-uv-check/cleanup init-name
+  ;;         (ffi-init-fn loop-ptr ptr)
+  ;;         (lambda () (foreign-free ptr)))
+  ;;       (make-handle ptr 'handle-type loop)))
+  ;;
+  ;; 示例：
+  ;;   (define-handle-init uv-timer-init timer
+  ;;     %ffi-uv-timer-size %ffi-uv-timer-init)
+
+  (define-syntax define-handle-init
+    (syntax-rules ()
+      [(_ init-name handle-type size-fn ffi-init-fn
+          uv-loop-ptr-fn allocate-fn make-handle-fn)
+       (define (init-name loop)
+         (let* ([size (size-fn)]
+                [ptr (allocate-fn size)]
+                [loop-ptr (uv-loop-ptr-fn loop)])
+           (with-uv-check/cleanup init-name
+             (ffi-init-fn loop-ptr ptr)
+             (lambda () (foreign-free ptr)))
+           (make-handle-fn ptr 'handle-type loop)))]))
+
+  ;; define-handle-start!: 句柄启动宏
+  ;;
+  ;; 标准化句柄启动模式（~30 实例）
+  ;;
+  ;; 用法：
+  ;;   (define-handle-start! start!-name ffi-start-fn callback-getter
+  ;;     handle-ptr-fn handle-data-set-fn handle-closed?-fn)
+  ;;
+  ;; 展开为标准的句柄启动函数，支持可变参数
+  ;;
+  ;; 示例：
+  ;;   (define-handle-start! uv-timer-start! %ffi-uv-timer-start get-timer-callback
+  ;;     handle-ptr handle-data-set! handle-closed?)
+
+  (define-syntax define-handle-start!
+    (syntax-rules ()
+      [(_ start!-name ffi-start-fn callback-getter
+          handle-ptr-fn handle-data-set-fn handle-closed?-fn)
+       (define (start!-name handle callback . args)
+         (when (handle-closed?-fn handle)
+           (error 'start!-name "handle is closed"))
+         ;; 保存用户回调
+         (handle-data-set-fn handle callback)
+         (lock-object callback)
+         ;; 启动句柄
+         (with-uv-check start!-name
+           (apply ffi-start-fn
+                  (handle-ptr-fn handle)
+                  (callback-getter)
+                  args)))]))
+
+  ;; define-handle-stop!: 句柄停止宏
+  ;;
+  ;; 标准化句柄停止和清理模式
+  ;;
+  ;; 用法：
+  ;;   (define-handle-stop! stop!-name ffi-stop-fn
+  ;;     handle-ptr-fn handle-data-fn handle-data-set-fn handle-closed?-fn)
+  ;;
+  ;; 展开为标准的句柄停止函数，包含回调清理
+  ;;
+  ;; 示例：
+  ;;   (define-handle-stop! uv-timer-stop! %ffi-uv-timer-stop
+  ;;     handle-ptr handle-data handle-data-set! handle-closed?)
+
+  (define-syntax define-handle-stop!
+    (syntax-rules ()
+      [(_ stop!-name ffi-stop-fn
+          handle-ptr-fn handle-data-fn handle-data-set-fn handle-closed?-fn)
+       (define (stop!-name handle)
+         (when (handle-closed?-fn handle)
+           (error 'stop!-name "handle is closed"))
+         (with-uv-check stop!-name
+           (ffi-stop-fn (handle-ptr-fn handle)))
+         ;; 清理回调
+         (let ([old-callback (handle-data-fn handle)])
+           (when old-callback
+             (unlock-object old-callback)
+             (handle-data-set-fn handle #f))))]))
+
+  ;; call-user-callback-with-error: 错误回调辅助宏
+  ;;
+  ;; 统一回调错误处理模式（~40 实例）
+  ;;
+  ;; 用法：
+  ;;   (call-user-callback-with-error callback status operation-name)
+  ;;   (call-user-callback-with-error callback status operation-name extra-arg)
+  ;;
+  ;; 展开为带错误检查的回调调用：
+  ;;   当 status < 0 时，调用 callback 并传递错误对象
+  ;;   当 status >= 0 时，调用 callback 并传递 #f 表示无错误
+
+  (define-syntax call-user-callback-with-error
+    (syntax-rules ()
+      ;; 单参数版本：callback 只接收错误或 #f
+      [(_ callback status operation-name err-name-fn make-error-fn)
+       (when callback
+         (if (< status 0)
+             (callback (make-error-fn status (err-name-fn status) 'operation-name))
+             (callback #f)))]
+      ;; 双参数版本：callback 接收额外参数和错误或 #f
+      [(_ callback status operation-name extra-arg err-name-fn make-error-fn)
+       (when callback
+         (if (< status 0)
+             (callback extra-arg (make-error-fn status (err-name-fn status) 'operation-name))
+             (callback extra-arg #f)))]))
 
 
   ;; ========================================
