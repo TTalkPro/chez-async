@@ -1,45 +1,38 @@
 ;;; internal/utils.ss - 通用工具函数
 ;;;
-;;; 提供减少代码重复的工具函数
+;;; 本模块提供减少代码重复的通用工具函数：
+;;; - 列表和集合操作
+;;; - 对象生命周期管理
+;;; - 调试和追踪工具
+;;;
+;;; 内存管理函数（allocate-zeroed, safe-free）从 foreign-utils 重新导出，
+;;; 以保持向后兼容性。
 
 (library (chez-async internal utils)
   (export
-    ;; 内存管理
+    ;; 内存管理（从 foreign-utils 重新导出）
     allocate-zeroed
     safe-free
 
-    ;; 列表和集合
+    ;; 列表和集合操作
     filter-map
     take-while
     drop-while
 
-    ;; 对象管理
+    ;; 对象生命周期管理
     managed-object
     with-managed-objects
 
     ;; 调试工具
     debug-log
+    debug-enabled?
     trace-call
     )
-  (import (chezscheme))
-
-  ;; ========================================
-  ;; 内存管理
-  ;; ========================================
-
-  (define (allocate-zeroed size)
-    "分配并初始化为零的内存"
-    (let ([ptr (foreign-alloc size)])
-      (let loop ([i 0])
-        (when (< i size)
-          (foreign-set! 'unsigned-8 ptr i 0)
-          (loop (+ i 1))))
-      ptr))
-
-  (define (safe-free ptr)
-    "安全释放内存（null 指针安全）"
-    (unless (or (not ptr) (= ptr 0))
-      (foreign-free ptr)))
+  (import (chezscheme)
+          ;; 导入内存管理函数，避免重复定义
+          (only (chez-async internal foreign-utils)
+                allocate-zeroed
+                safe-free))
 
   ;; ========================================
   ;; 列表和集合操作

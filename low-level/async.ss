@@ -19,27 +19,26 @@
           (chez-async low-level handle-base)
           (chez-async high-level event-loop)
           (chez-async internal macros)
+          (chez-async internal callback-registry)
           (chez-async internal utils))
 
   ;; ========================================
   ;; 全局 Async 回调
   ;; ========================================
+  ;;
+  ;; 使用统一回调注册表管理异步唤醒回调
+  ;; 回调在首次使用时延迟创建
 
-  (define *async-callback* #f)
-
-  (define (get-async-callback)
-    "获取全局 async 回调（延迟创建）"
-    (unless *async-callback*
-      (set! *async-callback*
-        (make-async-callback
-          (lambda (wrapper)
-            (let ([user-callback (handle-data wrapper)])
-              (when user-callback
-                (guard (e [else
-                           (fprintf (current-error-port)
-                                   "Error in async callback: ~a~n" e)])
-                  (user-callback wrapper))))))))
-    (foreign-callable-entry-point *async-callback*))
+  (define-registered-callback get-async-callback CALLBACK-ASYNC
+    (lambda ()
+      (make-async-callback
+        (lambda (wrapper)
+          (let ([user-callback (handle-data wrapper)])
+            (when user-callback
+              (guard (e [else
+                         (fprintf (current-error-port)
+                                 "Error in async callback: ~a~n" e)])
+                (user-callback wrapper))))))))
 
   ;; ========================================
   ;; Async handle 创建

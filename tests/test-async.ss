@@ -3,7 +3,11 @@
 
 (import (chezscheme)
         (chez-async tests framework)
-        (chez-async))
+        (chez-async high-level event-loop)
+        (chez-async high-level async-work)
+        (chez-async low-level async)
+        (chez-async low-level handle-base)
+        (chez-async low-level threadpool))
 
 (test-group "Async Work Tests"
 

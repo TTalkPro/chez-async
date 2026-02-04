@@ -15,13 +15,13 @@
   (import (chezscheme))
 
   ;; ========================================
-  ;; 测试状态
+  ;; 测试状态（使用 box 实现可变状态）
   ;; ========================================
 
-  (define *test-count* 0)
-  (define *test-passed* 0)
-  (define *test-failed* 0)
-  (define *current-group* #f)
+  (define *test-count* (box 0))
+  (define *test-passed* (box 0))
+  (define *test-failed* (box 0))
+  (define *current-group* (box #f))
 
   ;; ========================================
   ;; 断言
@@ -57,12 +57,12 @@
     (syntax-rules ()
       [(_ name body ...)
        (begin
-         (set! *test-count* (+ *test-count* 1))
-         (let ([test-name (if *current-group*
-                              (format "~a / ~a" *current-group* name)
+         (set-box! *test-count* (+ (unbox *test-count*) 1))
+         (let ([test-name (if (unbox *current-group*)
+                              (format "~a / ~a" (unbox *current-group*) name)
                               name)])
            (guard (e [else
-                      (set! *test-failed* (+ *test-failed* 1))
+                      (set-box! *test-failed* (+ (unbox *test-failed*) 1))
                       (fprintf (current-error-port)
                                "✗ FAIL: ~a~n  ~a~n"
                                test-name
@@ -71,27 +71,27 @@
                                      (lambda (p) (display-condition e p)))
                                    e))])
              (begin body ...)
-             (set! *test-passed* (+ *test-passed* 1))
+             (set-box! *test-passed* (+ (unbox *test-passed*) 1))
              (printf "✓ PASS: ~a~n" test-name))))]))
 
   (define-syntax test-group
     (syntax-rules ()
       [(_ name body ...)
-       (let ([old-group *current-group*])
-         (set! *current-group* name)
+       (let ([old-group (unbox *current-group*)])
+         (set-box! *current-group* name)
          (printf "~n=== ~a ===~n" name)
          body ...
-         (set! *current-group* old-group))]))
+         (set-box! *current-group* old-group))]))
 
   (define (run-tests)
     "运行所有测试并显示结果"
     (printf "~n~n========================================~n")
     (printf "Test Results:~n")
-    (printf "  Total:  ~a~n" *test-count*)
-    (printf "  Passed: ~a~n" *test-passed*)
-    (printf "  Failed: ~a~n" *test-failed*)
+    (printf "  Total:  ~a~n" (unbox *test-count*))
+    (printf "  Passed: ~a~n" (unbox *test-passed*))
+    (printf "  Failed: ~a~n" (unbox *test-failed*))
     (printf "========================================~n")
-    (if (= *test-failed* 0)
+    (if (= (unbox *test-failed*) 0)
         (begin
           (printf "~nAll tests passed! ✓~n")
           (exit 0))

@@ -48,7 +48,9 @@
           (chez-async ffi errors)
           (chez-async ffi handles)
           (chez-async ffi callbacks)
-          (chez-async internal utils))
+          (chez-async internal utils)
+          (chez-async internal callback-registry)
+          (chez-async internal macros))
 
   ;; ========================================
   ;; 句柄包装器记录类型
@@ -89,25 +91,27 @@
     (ptr->wrapper handle-ptr))
 
   ;; ========================================
-  ;; 关闭回调处理
+  ;; 简化别名（推荐使用）
   ;; ========================================
+  ;;
+  ;; 提供更短的函数名，推荐在应用代码中使用
+  ;; 注意：别名必须在回调定义之前，因为回调工厂函数引用这些名称
 
-  (define *close-callback* #f)
+  (define make-handle make-uv-handle-wrapper)
+  (define handle? uv-handle-wrapper?)
+  (define handle-ptr uv-handle-wrapper-ptr)
+  (define handle-type uv-handle-wrapper-type)
+  (define handle-loop uv-handle-wrapper-loop)
+  (define handle-data uv-handle-wrapper-scheme-data)
+  (define handle-data-set! uv-handle-wrapper-scheme-data-set!)
+  (define handle-closed? uv-handle-wrapper-closed?)
+  (define handle-closed?-set! uv-handle-wrapper-closed?-set!)
+  (define handle-close-callback uv-handle-wrapper-close-callback)
+  (define handle-close-callback-set! uv-handle-wrapper-close-callback-set!)
 
-  (define (get-close-callback)
-    "获取全局关闭回调（延迟创建）"
-    (unless *close-callback*
-      (set! *close-callback*
-        (make-close-callback
-          (lambda (wrapper)
-            ;; 执行用户关闭回调
-            (let ([user-cb (handle-close-callback wrapper)])
-              (when user-cb
-                (guard (e [else (handle-callback-error e)])
-                  (user-cb wrapper))))
-            ;; 清理资源
-            (cleanup-handle-wrapper! wrapper)))))
-    (foreign-callable-entry-point *close-callback*))
+  ;; ========================================
+  ;; 资源清理
+  ;; ========================================
 
   (define (cleanup-handle-wrapper! wrapper)
     "清理句柄包装器资源"
@@ -121,6 +125,25 @@
     (unlock-object wrapper)
     ;; 释放句柄内存
     (safe-free (handle-ptr wrapper)))
+
+  ;; ========================================
+  ;; 关闭回调处理
+  ;; ========================================
+  ;;
+  ;; 使用统一回调注册表管理关闭回调
+  ;; 回调在首次使用时延迟创建
+
+  (define-registered-callback get-close-callback CALLBACK-CLOSE
+    (lambda ()
+      (make-close-callback
+        (lambda (wrapper)
+          ;; 执行用户关闭回调
+          (let ([user-cb (handle-close-callback wrapper)])
+            (when user-cb
+              (guard (e [else (handle-callback-error e)])
+                (user-cb wrapper))))
+          ;; 清理资源
+          (cleanup-handle-wrapper! wrapper)))))
 
   ;; ========================================
   ;; 句柄操作
@@ -154,21 +177,5 @@
   (define (uv-handle-closing? wrapper)
     "检查句柄是否正在关闭"
     (not (= 0 (%ffi-uv-is-closing (handle-ptr wrapper)))))
-
-  ;; ========================================
-  ;; 简化别名（向后兼容）
-  ;; ========================================
-
-  (define make-handle make-uv-handle-wrapper)
-  (define handle? uv-handle-wrapper?)
-  (define handle-ptr uv-handle-wrapper-ptr)
-  (define handle-type uv-handle-wrapper-type)
-  (define handle-loop uv-handle-wrapper-loop)
-  (define handle-data uv-handle-wrapper-scheme-data)
-  (define handle-data-set! uv-handle-wrapper-scheme-data-set!)
-  (define handle-closed? uv-handle-wrapper-closed?)
-  (define handle-closed?-set! uv-handle-wrapper-closed?-set!)
-  (define handle-close-callback uv-handle-wrapper-close-callback)
-  (define handle-close-callback-set! uv-handle-wrapper-close-callback-set!)
 
 ) ; end library

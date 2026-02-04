@@ -1,6 +1,23 @@
 ;;; ffi/callbacks.ss - 回调管理基础设施
 ;;;
-;;; 提供 C 回调的创建、注册和管理机制
+;;; 本模块提供 C 回调的创建、注册和管理机制：
+;;;
+;;; 1. GC 保护注册表 (*gc-protected-callbacks*)
+;;;    - 防止 foreign-callable 被垃圾回收
+;;;    - 通过 register-c-callback!/unregister-c-callback! 访问
+;;;
+;;; 2. 指针-包装器映射 (*ptr-to-wrapper-registry*)
+;;;    - 将 C 指针映射到 Scheme 包装器对象
+;;;    - 通过 ptr->wrapper/register-ptr-wrapper!/unregister-ptr-wrapper! 访问
+;;;
+;;; 3. 回调工厂函数 (make-*-callback)
+;;;    - 创建各种类型的 foreign-callable
+;;;    - 自动注册到 GC 保护注册表
+;;;    - 自动查找指针对应的包装器
+;;;
+;;; 注意：此模块与 internal/callback-registry.ss 配合使用：
+;;; - internal/callback-registry.ss 管理延迟初始化的全局回调
+;;; - 此模块提供回调工厂和运行时管理
 
 (library (chez-async ffi callbacks)
   (export
@@ -25,6 +42,16 @@
     make-connection-callback
     make-async-callback
 
+    ;; UDP 回调
+    make-udp-send-callback
+    make-udp-recv-callback
+
+    ;; Signal 回调
+    make-signal-callback
+
+    ;; Poll 回调
+    make-poll-callback
+
     ;; 错误处理
     handle-callback-error
     )
@@ -32,20 +59,31 @@
           (chez-async ffi errors))
 
   ;; ========================================
-  ;; 回调注册表
+  ;; GC 保护注册表
   ;; ========================================
+  ;;
+  ;; 此注册表用于防止 foreign-callable 被垃圾回收。
+  ;; 当创建 foreign-callable 后，必须将其存储在此注册表中，
+  ;; 否则可能在 C 代码调用前就被 GC 回收。
+  ;;
+  ;; 注意：这与 internal/callback-registry.ss 中的回调注册表不同：
+  ;; - internal/callback-registry.ss: 管理延迟初始化的全局回调工厂
+  ;; - 此注册表: 防止已创建的 foreign-callable 被 GC 回收
 
-  ;; 全局回调注册表（防止 foreign-callable 被 GC）
-  (define *callback-registry* (make-eq-hashtable))
+  (define *gc-protected-callbacks* (make-eq-hashtable))
 
   (define (register-c-callback! key callback)
-    "注册 C 回调，防止被 GC"
-    (hashtable-set! *callback-registry* key callback)
+    "注册 C 回调到 GC 保护注册表，防止被垃圾回收
+     key: 唯一标识键（通常为 (cons proc signature)）
+     callback: foreign-callable 对象
+     返回: callback 本身"
+    (hashtable-set! *gc-protected-callbacks* key callback)
     callback)
 
   (define (unregister-c-callback! key)
-    "注销 C 回调"
-    (hashtable-delete! *callback-registry* key))
+    "从 GC 保护注册表中移除回调
+     key: 之前注册时使用的键"
+    (hashtable-delete! *gc-protected-callbacks* key))
 
   ;; ========================================
   ;; 错误处理
@@ -61,23 +99,36 @@
                  e)))
 
   ;; ========================================
-  ;; 辅助函数
+  ;; 指针-包装器映射注册表
   ;; ========================================
+  ;;
+  ;; 此注册表维护 C 指针到 Scheme 包装器对象的映射。
+  ;; 当 libuv 回调被触发时，我们只能得到 C 指针，
+  ;; 需要通过此注册表找到对应的 Scheme 包装器对象。
+  ;;
+  ;; 典型用法：
+  ;; 1. 创建句柄/请求时：(register-ptr-wrapper! ptr wrapper)
+  ;; 2. 回调中查找包装器：(ptr->wrapper ptr)
+  ;; 3. 关闭时清理：(unregister-ptr-wrapper! ptr)
 
-  ;; 全局注册表：C 指针 → Scheme 对象
-  (define *ptr-to-object-registry* (make-hashtable equal-hash equal?))
+  (define *ptr-to-wrapper-registry* (make-hashtable equal-hash equal?))
 
   (define (ptr->wrapper ptr)
-    "从 C 指针获取 Scheme 包装器对象"
-    (hashtable-ref *ptr-to-object-registry* ptr #f))
+    "从 C 指针获取对应的 Scheme 包装器对象
+     ptr: libuv 句柄或请求的 C 指针
+     返回: 对应的包装器对象，如果未找到则返回 #f"
+    (hashtable-ref *ptr-to-wrapper-registry* ptr #f))
 
   (define (register-ptr-wrapper! ptr wrapper)
-    "注册 C 指针和 Scheme 包装器的映射"
-    (hashtable-set! *ptr-to-object-registry* ptr wrapper))
+    "注册 C 指针和 Scheme 包装器的映射
+     ptr: libuv 句柄或请求的 C 指针
+     wrapper: 对应的 Scheme 包装器对象（handle 或 request）"
+    (hashtable-set! *ptr-to-wrapper-registry* ptr wrapper))
 
   (define (unregister-ptr-wrapper! ptr)
-    "注销 C 指针和 Scheme 包装器的映射"
-    (hashtable-delete! *ptr-to-object-registry* ptr))
+    "从注册表中移除指针映射（通常在句柄关闭时调用）
+     ptr: 要移除的 C 指针"
+    (hashtable-delete! *ptr-to-wrapper-registry* ptr))
 
   ;; ========================================
   ;; 回调工厂函数
@@ -186,5 +237,52 @@
   (define (make-async-callback scheme-proc)
     "创建异步唤醒回调"
     (make-generic-callback scheme-proc '(void*)))
+
+  ;; UDP send 回调: void (*uv_udp_send_cb)(uv_udp_send_t* req, int status)
+  (define (make-udp-send-callback scheme-proc)
+    "创建 UDP 发送回调"
+    (make-generic-callback scheme-proc '(void* int)))
+
+  ;; UDP recv 回调: void (*uv_udp_recv_cb)(uv_udp_t* handle, ssize_t nread,
+  ;;                                        const uv_buf_t* buf,
+  ;;                                        const struct sockaddr* addr,
+  ;;                                        unsigned flags)
+  (define (make-udp-recv-callback scheme-proc)
+    "创建 UDP 接收回调"
+    (let ([wrapper
+           (foreign-callable
+             (lambda (handle-ptr nread buf-ptr addr-ptr flags)
+               (guard (e [else (handle-callback-error e)])
+                 (let ([wrapper (ptr->wrapper handle-ptr)])
+                   (when wrapper (scheme-proc wrapper nread buf-ptr addr-ptr flags)))))
+             (void* ssize_t void* void* unsigned-int) void)])
+      (register-c-callback! (cons scheme-proc 'udp-recv) wrapper)
+      wrapper))
+
+  ;; Signal 回调: void (*uv_signal_cb)(uv_signal_t* handle, int signum)
+  (define (make-signal-callback scheme-proc)
+    "创建信号处理回调"
+    (let ([wrapper
+           (foreign-callable
+             (lambda (handle-ptr signum)
+               (guard (e [else (handle-callback-error e)])
+                 (let ([wrapper (ptr->wrapper handle-ptr)])
+                   (when wrapper (scheme-proc wrapper signum)))))
+             (void* int) void)])
+      (register-c-callback! (cons scheme-proc 'signal) wrapper)
+      wrapper))
+
+  ;; Poll 回调: void (*uv_poll_cb)(uv_poll_t* handle, int status, int events)
+  (define (make-poll-callback scheme-proc)
+    "创建轮询回调"
+    (let ([wrapper
+           (foreign-callable
+             (lambda (handle-ptr status events)
+               (guard (e [else (handle-callback-error e)])
+                 (let ([wrapper (ptr->wrapper handle-ptr)])
+                   (when wrapper (scheme-proc wrapper status events)))))
+             (void* int int) void)])
+      (register-c-callback! (cons scheme-proc 'poll) wrapper)
+      wrapper))
 
 ) ; end library
