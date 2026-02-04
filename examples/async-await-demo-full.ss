@@ -11,7 +11,7 @@
     ("../ffi" . "../ffi")))
 
 (import (chezscheme)
-        (chez-async high-level async-await-cc)
+        (chez-async high-level async-await)
         (chez-async high-level promise)
         (chez-async high-level event-loop)
         (chez-async low-level timer)

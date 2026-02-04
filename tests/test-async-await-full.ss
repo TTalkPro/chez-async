@@ -1,7 +1,7 @@
 ;;; tests/test-async-await-cc.ss - async/await (call/cc 版本) 测试
 
 (import (chezscheme)
-        (chez-async high-level async-await-cc)
+        (chez-async high-level async-await)
         (chez-async high-level promise)
         (chez-async high-level event-loop)
         (chez-async low-level timer)

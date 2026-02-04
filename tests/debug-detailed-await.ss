@@ -1,7 +1,7 @@
 ;;; tests/debug-detailed-await.ss - 详细调试 await
 
 (import (chezscheme)
-        (chez-async high-level async-await-cc)
+        (chez-async high-level async-await)
         (chez-async high-level promise)
         (chez-async high-level event-loop)
         (chez-async internal coroutine)

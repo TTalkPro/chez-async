@@ -1,7 +1,7 @@
 ;;; tests/test-async-simple.ss - 简化的 async/await 测试
 
 (import (chezscheme)
-        (chez-async high-level async-await-cc)
+        (chez-async high-level async-await)
         (chez-async high-level promise)
         (chez-async high-level event-loop))
 

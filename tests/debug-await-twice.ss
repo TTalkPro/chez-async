@@ -1,7 +1,7 @@
 ;;; tests/debug-await-twice.ss - 调试连续两次 await
 
 (import (chezscheme)
-        (chez-async high-level async-await-cc)
+        (chez-async high-level async-await)
         (chez-async high-level promise)
         (chez-async high-level event-loop))
 

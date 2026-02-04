@@ -12,4 +12,4 @@
     ("./ffi" . "./ffi")))
 
 ;; 加载测试
-(load "tests/test-async-await-cc.ss")
+(load "tests/test-async-await-full.ss")

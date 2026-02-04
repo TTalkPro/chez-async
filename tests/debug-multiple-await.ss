@@ -1,7 +1,7 @@
 ;;; tests/debug-multiple-await.ss - 调试多次 await
 
 (import (chezscheme)
-        (chez-async high-level async-await-cc)
+        (chez-async high-level async-await)
         (chez-async high-level promise)
         (chez-async high-level event-loop)
         (chez-async internal scheduler)
