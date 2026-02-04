@@ -1,22 +1,24 @@
-;;; examples/async-await-demo.ss - async/await 语法糖演示
+;;; examples/async-await-demo.ss - async/await 简化版演示
 ;;;
-;;; 演示 chez-async 的 async/await 语法糖用法
+;;; 演示 chez-async 的轻量级 async/await 语法糖用法
+;;;
+;;; 注意：这个示例使用 async-await-simple（简化版）
+;;; 完整功能请参考 async-await-cc-demo.ss
 ;;;
 ;;; 目前支持的功能：
 ;;; 1. 简单的 async 块
 ;;; 2. await Promise（顶层表达式）
 ;;; 3. async* 带参数的异步函数
 ;;;
-;;; 待完善的功能：
+;;; 限制：
 ;;; - let/let* 中的 await（需要更复杂的宏展开）
 ;;; - 多表达式的序列执行
 ;;; - if/cond/case 等控制结构中的 await
-;;; - 与 promise-all 等组合子的完整集成
 
 (import (chezscheme)
         (chez-async high-level event-loop)
         (chez-async high-level promise)
-        (chez-async high-level async-await))
+        (chez-async high-level async-await-simple))
 
 ;; ========================================
 ;; 示例 1: 简单的 async 块

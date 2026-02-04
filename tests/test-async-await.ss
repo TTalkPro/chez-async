@@ -1,10 +1,12 @@
-;;; tests/test-async-await.ss - async/await 语法糖测试
+;;; tests/test-async-await.ss - async/await 简化版测试
+;;;
+;;; 测试 async-await-simple（轻量级实现）
 
 (import (chezscheme)
         (chez-async high-level event-loop)
         (chez-async low-level timer)
         (chez-async high-level promise)
-        (chez-async high-level async-await))
+        (chez-async high-level async-await-simple))
 
 ;; ========================================
 ;; 测试辅助函数

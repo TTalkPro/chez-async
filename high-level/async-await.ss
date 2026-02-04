@@ -1,85 +1,30 @@
-;;; high-level/async-await.ss - async/await 语法糖
+;;; high-level/async-await.ss - async/await 默认实现
 ;;;
-;;; 提供 async/await 语法糖，简化异步代码编写
+;;; 默认导出基于 call/cc 的完整 async/await 实现
+;;;
+;;; 这个文件作为默认入口，导出 async-await-cc 的所有功能。
+;;; 用户可以简单地导入 (chez-async high-level async-await) 获得
+;;; 完整的协程功能。
+;;;
+;;; 可选导入：
+;;; - (chez-async high-level async-await)        - 默认（本文件，指向 async-await-cc）
+;;; - (chez-async high-level async-await-cc)     - 完整实现（显式导入）
+;;; - (chez-async high-level async-await-simple) - 轻量级实现（Promise 宏）
 
 (library (chez-async high-level async-await)
   (export
+    ;; 核心宏
     async
     await
     async*
-    async-run)
 
-  (import (chezscheme)
-          (chez-async high-level promise)
-          (chez-async high-level event-loop)
-          (chez-async high-level async-work))
+    ;; 运行函数
+    run-async
+    run-async-loop
 
-  ;; ========================================
-  ;; await - 等待 Promise 完成的标记
-  ;; ========================================
-  ;;
-  ;; await 必须在 async 块内使用
-  ;; 它实际上是一个语法标记，由 async 宏处理
+    ;; 工具函数
+    async-value
+    async-error)
 
-  (define-syntax await
-    (syntax-rules ()
-      [(await expr)
-       #'expr]))
-
-  ;; ========================================
-  ;; async - 创建异步块
-  ;; ========================================
-  ;;
-  ;; async 块会扫描其中的 await 表达式，并将它们转换为 Promise 链
-
-  (define-syntax async
-    (syntax-rules ()
-      ;; Simple await - just return the promise
-      [(_ (await expr))
-       expr]
-      ;; Multiple expressions in sequence
-      [(_ expr1 expr2 expr3 ...)
-       (make-promise
-         (lambda (resolve reject)
-           (let ([result (async expr1)])
-             (promise-then result
-               (lambda (_)
-                 (let ([r2 (async expr2 expr3 ...)])
-                   (promise-then r2
-                     (lambda (v) (resolve v)))))))))]
-      ;; Single expression - wrap in promise
-      [(_ expr)
-       (make-promise
-         (lambda (resolve reject)
-           (guard (e [else (reject e)])
-             (resolve expr))))]))
-
-  ;; ========================================
-  ;; async* - 带参数的异步函数（语法糖）
-  ;; ========================================
-
-  (define-syntax async*
-    (syntax-rules ()
-      [(_ (args ...) body ...)
-       (lambda (args ...)
-         (async body ...))]))
-
-  ;; ========================================
-  ;; 高级 async 实用函数
-  ;; ========================================
-
-  (define (async-run thunk)
-    "运行异步 thunk，返回 Promise
-
-     thunk: 无参数函数，包含异步操作"
-    (make-promise
-      (lambda (resolve reject)
-        ;; 在后台任务中执行
-        (async-work (uv-default-loop)
-          thunk
-          (lambda (result)
-            (resolve result))
-          (lambda (err)
-            (reject err))))))
-
-  ) ; end library
+  ;; 直接导出 async-await-cc 的所有内容
+  (import (chez-async high-level async-await-cc)))
