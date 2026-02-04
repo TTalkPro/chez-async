@@ -228,7 +228,7 @@
 
   (define (sockaddr->string addr-ptr)
     "将 sockaddr 转换为字符串（ip:port 格式）"
-    (let ([family (foreign-ref 'unsigned-16 addr-ptr 0)])
+    (let ([family (sockaddr-get-family addr-ptr)])
       (cond
         [(= family AF_INET)
          (let ([ip (sockaddr-in-addr addr-ptr)]

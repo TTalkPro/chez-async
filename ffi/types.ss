@@ -19,6 +19,11 @@
     uv-stat-t
     uv-timespec-t
 
+    ;; 平台相关辅助函数
+    sockaddr-family-offset    ; 地址族字段的偏移量
+    sockaddr-get-family       ; 从 sockaddr 获取地址族
+    bsd-style-sockaddr?       ; 是否是 BSD 风格的 sockaddr
+
     ;; 枚举类型
     uv-run-mode uv-run-mode->int
     uv-handle-type uv-handle-type->int
@@ -157,12 +162,75 @@
       [else (error 'uv-handle-type->int "invalid handle type" type)]))
 
   ;; ========================================
+  ;; 平台检测辅助函数
+  ;; ========================================
+
+  ;; BSD 系统的 sockaddr 结构有 sin_len 字段在 sin_family 之前
+  ;; Linux 系统没有 sin_len 字段
+  (define bsd-style-sockaddr?
+    (case (machine-type)
+      ;; BSD 系统: macOS, FreeBSD, OpenBSD, NetBSD
+      [(i3osx ti3osx a6osx ta6osx arm64osx tarm64osx   ; macOS
+        i3fb ti3fb a6fb ta6fb                          ; FreeBSD
+        i3ob ti3ob a6ob ta6ob arm64ob tarm64ob         ; OpenBSD
+        i3nb ti3nb a6nb ta6nb)                         ; NetBSD
+       #t]
+      ;; Linux, Windows 使用无 sin_len 的布局
+      [else #f]))
+
+  ;; 地址族字段的偏移量
+  ;; BSD: 偏移 1 (sin_len 在偏移 0)
+  ;; Linux: 偏移 0
+  (define sockaddr-family-offset
+    (if bsd-style-sockaddr? 1 0))
+
+  ;; 从 sockaddr 指针获取地址族
+  (define (sockaddr-get-family addr-ptr)
+    "从 sockaddr 结构获取地址族
+     addr-ptr: sockaddr 结构的指针
+     返回: 地址族值 (AF_INET, AF_INET6 等)"
+    (if bsd-style-sockaddr?
+        ;; BSD: sin_family 是 uint8_t 在偏移 1
+        (foreign-ref 'unsigned-8 addr-ptr 1)
+        ;; Linux: sin_family 是 uint16_t 在偏移 0
+        (foreign-ref 'unsigned-16 addr-ptr 0)))
+
+  ;; ========================================
   ;; 常量
   ;; ========================================
 
-  ;; 地址族
+  ;; 地址族 - 平台相关
+  ;; AF_INET 在所有平台都是 2
+  ;; AF_INET6 在不同平台有不同值:
+  ;;   - Linux: 10
+  ;;   - macOS/iOS: 30
+  ;;   - FreeBSD: 28
+  ;;   - OpenBSD: 24
+  ;;   - NetBSD: 24
+  ;;   - Windows: 23
   (define AF_INET 2)
-  (define AF_INET6 10)
+  (define AF_INET6
+    (case (machine-type)
+      ;; Linux
+      [(i3le ti3le a6le ta6le arm32le arm64le ppc32le ppc64le)
+       10]
+      ;; macOS
+      [(i3osx ti3osx a6osx ta6osx arm64osx tarm64osx)
+       30]
+      ;; FreeBSD
+      [(i3fb ti3fb a6fb ta6fb)
+       28]
+      ;; OpenBSD
+      [(i3ob ti3ob a6ob ta6ob arm64ob tarm64ob)
+       24]
+      ;; NetBSD
+      [(i3nb ti3nb a6nb ta6nb)
+       24]
+      ;; Windows
+      [(i3nt ti3nt a6nt ta6nt)
+       23]
+      ;; 默认使用 Linux 值
+      [else 10]))
 
   ;; 套接字类型
   (define SOCK_STREAM 1)

@@ -176,7 +176,7 @@
 
   (define (parse-sender-address addr-ptr)
     "解析发送方地址，返回 (ip . port) 点对"
-    (let ([family (foreign-ref 'unsigned-16 addr-ptr 0)])
+    (let ([family (sockaddr-get-family addr-ptr)])
       (cond
         [(= family AF_INET)
          (cons (sockaddr-in-addr addr-ptr)
@@ -425,12 +425,12 @@
                  (raise e)])
         (with-uv-check uv-udp-getsockname
           (%ffi-uv-udp-getsockname (handle-ptr udp) addr-ptr len-ptr))
-        (let ([family (foreign-ref 'unsigned-16 addr-ptr 0)]
-              [result (if (= (foreign-ref 'unsigned-16 addr-ptr 0) AF_INET)
-                          (cons (sockaddr-in-addr addr-ptr)
-                                (sockaddr-in-port addr-ptr))
-                          (cons (sockaddr-in6-addr addr-ptr)
-                                (sockaddr-in6-port addr-ptr)))])
+        (let* ([family (sockaddr-get-family addr-ptr)]
+               [result (if (= family AF_INET)
+                           (cons (sockaddr-in-addr addr-ptr)
+                                 (sockaddr-in-port addr-ptr))
+                           (cons (sockaddr-in6-addr addr-ptr)
+                                 (sockaddr-in6-port addr-ptr)))])
           (foreign-free addr-ptr)
           (foreign-free len-ptr)
           result))))
@@ -450,12 +450,12 @@
                  (raise e)])
         (with-uv-check uv-udp-getpeername
           (%ffi-uv-udp-getpeername (handle-ptr udp) addr-ptr len-ptr))
-        (let ([family (foreign-ref 'unsigned-16 addr-ptr 0)]
-              [result (if (= (foreign-ref 'unsigned-16 addr-ptr 0) AF_INET)
-                          (cons (sockaddr-in-addr addr-ptr)
-                                (sockaddr-in-port addr-ptr))
-                          (cons (sockaddr-in6-addr addr-ptr)
-                                (sockaddr-in6-port addr-ptr)))])
+        (let* ([family (sockaddr-get-family addr-ptr)]
+               [result (if (= family AF_INET)
+                           (cons (sockaddr-in-addr addr-ptr)
+                                 (sockaddr-in-port addr-ptr))
+                           (cons (sockaddr-in6-addr addr-ptr)
+                                 (sockaddr-in6-port addr-ptr)))])
           (foreign-free addr-ptr)
           (foreign-free len-ptr)
           result))))
