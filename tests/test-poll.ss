@@ -1,8 +1,5 @@
 #!/usr/bin/env scheme-script
 ;;; tests/test-poll.ss - Poll 功能测试
-;;;
-;;; 注意：Poll 测试需要直接使用 POSIX 系统调用（pipe, close, write）
-;;; 在不支持直接 libc 链接的平台（如 FreeBSD）上，这些测试会被跳过
 
 (import (chezscheme)
         (chez-async tests framework)
@@ -12,11 +9,7 @@
         (chez-async low-level handle-base)
         (chez-async internal posix-ffi))
 
-;; Check if we can use direct system calls
-(define %can-use-posix-ffi?
-  (posix-ffi-available?))
-
-;; 辅助函数：创建管道（用于测试轮询）
+;; 辅助函数：创建管道（使用自动加载的 libc）
 (define (make-pipe)
   "创建管道，返回 (read-fd . write-fd)"
   (let ([fds (foreign-alloc (* 2 (foreign-sizeof 'int)))])
@@ -41,14 +34,6 @@
     (let ([result (posix-write fd buf len)])
       (foreign-free buf)
       result)))
-
-;; Skip entire test group if POSIX FFI is not available
-(unless %can-use-posix-ffi?
-  (printf "=== Poll Tests ===~n")
-  (printf "Note: Poll tests skipped - POSIX FFI not available on this platform~n")
-  (printf "This is expected on some platforms (e.g., FreeBSD) that don't automatically link libc~n")
-  (printf "Use libuv's pipe or stream functionality instead for cross-platform code~n")
-  (exit 0))
 
 (test-group "Poll Tests"
 

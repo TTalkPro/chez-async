@@ -1,8 +1,5 @@
 #!/usr/bin/env scheme-script
 ;;; tests/test-signal.ss - Signal 功能测试
-;;;
-;;; 注意：Signal 测试需要直接使用 POSIX 系统调用（kill, getpid）
-;;; 在不支持直接 libc 链接的平台（如 FreeBSD）上，这些测试会被跳过
 
 (import (chezscheme)
         (chez-async tests framework)
@@ -12,22 +9,11 @@
         (chez-async low-level handle-base)
         (chez-async internal posix-ffi))
 
-;; Check if we can use direct system calls
-(define %can-use-posix-ffi?
-  (posix-ffi-available?))
-
-;; 辅助函数：发送信号给当前进程
+;; 辅助函数：发送信号给当前进程（使用自动加载的 libc）
 (define (send-signal signum)
   "向当前进程发送信号"
   (let ([pid (posix-getpid)])
     (posix-kill pid signum)))
-
-;; Skip entire test group if POSIX FFI is not available
-(unless %can-use-posix-ffi?
-  (printf "=== Signal Tests ===~n")
-  (printf "Note: Signal tests skipped - POSIX FFI not available on this platform~n")
-  (printf "This is expected on some platforms (e.g., FreeBSD) that don't automatically link libc~n")
-  (exit 0))
 
 (test-group "Signal Tests"
 
@@ -134,6 +120,37 @@
       ;; 验证两个句柄都收到了信号
       (assert-true (= count1 1) "first handler should receive signal")
       (assert-true (= count2 1) "second handler should receive signal")
+      ;; 清理
+      (uv-loop-close loop)))
+
+  (test "signal-different-signals"
+    (let* ([loop (uv-loop-init)]
+           [sig-int (uv-signal-init loop)]
+           [sig-term (uv-signal-init loop)]
+           [timer (uv-timer-init loop)]
+           [int-received? #f]
+           [term-received? #f])
+      ;; 监听 SIGUSR1 和 SIGUSR2
+      (uv-signal-start! sig-int SIGUSR1
+        (lambda (s signum)
+          (set! int-received? #t)
+          (uv-signal-stop! s)
+          (uv-handle-close! s)))
+      (uv-signal-start! sig-term SIGUSR2
+        (lambda (s signum)
+          (set! term-received? #t)
+          (uv-signal-stop! s)
+          (uv-handle-close! s)))
+      ;; 发送不同的信号
+      (uv-timer-start! timer 10 0
+        (lambda (t)
+          (send-signal SIGUSR1)
+          (uv-handle-close! t)))
+      ;; 运行事件循环
+      (uv-run loop 'default)
+      ;; 验证收到正确的信号
+      (assert-true int-received? "should receive SIGUSR1")
+      (assert-false term-received? "should not receive SIGUSR2")
       ;; 清理
       (uv-loop-close loop)))
 
