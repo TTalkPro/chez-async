@@ -65,6 +65,7 @@
           (chez-async high-level event-loop)
           (chez-async internal macros)
           (chez-async internal callback-registry)
+          (only (chez-async internal buffer-utils) foreign->bytevector)
           (chez-async internal utils))
 
   ;; ========================================
@@ -103,10 +104,7 @@
                 (when data-ptr (foreign-free data-ptr))
                 (when buf-ptr (foreign-free buf-ptr))))
             ;; 调用用户回调
-            (when user-callback
-              (if (< status 0)
-                  (user-callback (make-uv-error status (%ffi-uv-err-name status) 'udp-send))
-                  (user-callback #f)))
+            (call-user-callback-with-error user-callback status udp-send %ffi-uv-err-name make-uv-error)
             ;; 清理请求
             (cleanup-request-wrapper! req-wrapper))))))
 
@@ -144,14 +142,10 @@
                     [else
                      (let* ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)]
                             [base (ftype-ref uv-buf-t (base) buf-fptr)]
-                            [bv (make-bytevector nread)]
+                            [bv (foreign->bytevector base nread)]
                             [sender-addr (if (= addr-ptr 0)
                                              #f
                                              (parse-sender-address addr-ptr))])
-                       ;; 复制数据到 bytevector
-                       (do ([i 0 (+ i 1)])
-                           ((= i nread))
-                         (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 base i)))
                        (user-callback wrapper bv sender-addr flags))])))))))))
 
   ;; 复用 stream 模块的 alloc 回调

@@ -42,6 +42,7 @@
           (chez-async low-level buffer)
           (chez-async internal macros)
           (chez-async internal callback-registry)
+          (only (chez-async internal buffer-utils) foreign->bytevector)
           (chez-async internal utils))
 
   ;; ========================================
@@ -89,11 +90,7 @@
                       ;; 读取成功
                       (let* ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)]
                              [base (ftype-ref uv-buf-t (base) buf-fptr)]
-                             [bv (make-bytevector nread)])
-                        ;; 复制数据到 bytevector
-                        (do ([i 0 (+ i 1)])
-                            ((= i nread))
-                          (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 base i)))
+                             [bv (foreign->bytevector base nread)])
                         (user-callback wrapper bv)))))))))))
 
   ;; Write 回调：处理写入完成
@@ -110,10 +107,7 @@
                 (when data-ptr (foreign-free data-ptr))
                 (when buf-ptr (foreign-free buf-ptr))))
             ;; 调用用户回调
-            (when user-callback
-              (if (< status 0)
-                  (user-callback (make-uv-error status (%ffi-uv-err-name status) 'write))
-                  (user-callback #f)))
+            (call-user-callback-with-error user-callback status write %ffi-uv-err-name make-uv-error)
             ;; 清理请求
             (cleanup-request-wrapper! req-wrapper))))))
 
@@ -124,10 +118,7 @@
         (lambda (req-wrapper status)
           (let ([user-callback (uv-request-wrapper-scheme-callback req-wrapper)])
             ;; 调用用户回调
-            (when user-callback
-              (if (< status 0)
-                  (user-callback (make-uv-error status (%ffi-uv-err-name status) 'shutdown))
-                  (user-callback #f)))
+            (call-user-callback-with-error user-callback status shutdown %ffi-uv-err-name make-uv-error)
             ;; 清理请求
             (cleanup-request-wrapper! req-wrapper))))))
 
@@ -137,10 +128,7 @@
       (make-connection-callback
         (lambda (server-wrapper status)
           (let ([user-callback (handle-data server-wrapper)])
-            (when user-callback
-              (if (< status 0)
-                  (user-callback server-wrapper (make-uv-error status (%ffi-uv-err-name status) 'connection))
-                  (user-callback server-wrapper #f))))))))
+            (call-user-callback-with-error user-callback status connection server-wrapper %ffi-uv-err-name make-uv-error))))))
 
   ;; ========================================
   ;; Stream 读取

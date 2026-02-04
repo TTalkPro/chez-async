@@ -67,10 +67,7 @@
           (let ([user-callback (uv-request-wrapper-scheme-callback req-wrapper)]
                 [pipe-handle (uv-request-wrapper-scheme-data req-wrapper)])
             ;; 调用用户回调
-            (when user-callback
-              (if (< status 0)
-                  (user-callback pipe-handle (make-uv-error status (%ffi-uv-err-name status) 'pipe-connect))
-                  (user-callback pipe-handle #f)))
+            (call-user-callback-with-error user-callback status pipe-connect pipe-handle %ffi-uv-err-name make-uv-error)
             ;; 清理请求
             (cleanup-request-wrapper! req-wrapper))))))
 

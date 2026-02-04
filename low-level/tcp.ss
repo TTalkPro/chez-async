@@ -66,10 +66,7 @@
           (let ([user-callback (uv-request-wrapper-scheme-callback req-wrapper)]
                 [tcp-handle (uv-request-wrapper-scheme-data req-wrapper)])
             ;; 调用用户回调
-            (when user-callback
-              (if (< status 0)
-                  (user-callback tcp-handle (make-uv-error status (%ffi-uv-err-name status) 'connect))
-                  (user-callback tcp-handle #f)))
+            (call-user-callback-with-error user-callback status connect tcp-handle %ffi-uv-err-name make-uv-error)
             ;; 清理请求
             (cleanup-request-wrapper! req-wrapper))))))
 

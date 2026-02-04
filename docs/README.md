@@ -50,10 +50,8 @@
 
 | 文档 | 说明 |
 |------|------|
-| [Phase 1 Complete](phase1-complete.md) | 协程调度器实现完成 |
-| [Phase 2 Complete](phase2-complete.md) | async/await 宏实现完成 |
-| [Phase 3 Complete](phase3-complete.md) | libuv 深度集成完成 |
-| [Phase 4 Complete](phase4-complete.md) | 高级特性实现完成 |
+| [Phase 4 Complete](phase4-complete.md) | 完整实现报告（包含 Phase 1-4 总结）|
+| [Refactoring Complete](REFACTORING-COMPLETE.md) | 代码质量优化重构完成 |
 
 ---
 
@@ -75,6 +73,7 @@
 
 ### API 参考
 
+- **[API 索引](api/README.md)** - API 文档完整索引
 - **[Timer API](api/timer.md)** - 定时器 API
 - **[TCP API](api/tcp.md)** - TCP 套接字 API
 
@@ -84,11 +83,11 @@
 
 | 类型 | 数量 | 总行数 |
 |------|------|--------|
-| 使用指南 | 5 | ~2,500 |
-| 技术文档 | 2 | ~1,400 |
-| API 参考 | 2 | ~500 |
-| 完成报告 | 4 | ~1,200 |
-| **总计** | **13** | **~5,600** |
+| 使用指南 | 6 | ~3,500 |
+| 技术文档 | 2 | ~1,350 |
+| API 参考 | 3 | ~1,050 |
+| 完成报告 | 2 | ~800 |
+| **总计** | **14** | **~6,700** |
 
 ---
 
@@ -107,10 +106,11 @@
 
 - **async 如何工作？** → [async Implementation](async-implementation-explained.md)
 - **Promise 如何实现？** → [Promise Implementation](promise-implementation-explained.md)
-- **项目的发展历程？** → [Phase 1-4 Complete Reports](phase1-complete.md)
+- **项目的发展历程？** → [Phase 4 Complete Report](phase4-complete.md)
 
 ### 我想查阅...
 
+- **API 索引？** → [API 索引](api/README.md)
 - **Timer API？** → [Timer API](api/timer.md)
 - **TCP API？** → [TCP API](api/tcp.md)
 
