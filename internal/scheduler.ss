@@ -212,14 +212,14 @@
               ;; 成功回调
               (lambda (value)
                 (resume-coroutine! sched coro value #f))
-              ;; 错误回调
+              ;; 错误回调 - 包装错误以便在恢复后抛出
               (lambda (error)
-                (resume-coroutine! sched coro error #t)))
+                ;; 创建一个包装器，标记这是一个错误
+                (let ([error-wrapper (cons 'promise-error error)])
+                  (resume-coroutine! sched coro error-wrapper #t))))
 
-            ;; 4. 清除当前协程
-            (current-coroutine #f)
-
-            ;; 5. 跳回调度器（借鉴 chez-socket 的做法）
+            ;; 4. 跳回调度器（借鉴 chez-socket 的做法）
+            ;; 注意：不清除 current-coroutine，parameterize 会自动管理
             (let ([scheduler-k (scheduler-state-scheduler-k sched)])
               (if scheduler-k
                   ;; 如果有保存的调度器 continuation，跳回调度器
@@ -278,12 +278,14 @@
 
     (parameterize ([current-coroutine coro])
       (let ([k (coroutine-continuation coro)]
-            [is-first-run? (coroutine-created? coro)])
+            [is-first-run? (coroutine-created? coro)]
+            [is-failed? (coroutine-failed? coro)])
         (unless k
           (error 'run-coroutine! "No continuation for coroutine" (coroutine-id coro)))
 
-        ;; 设置为运行状态
-        (coroutine-state-set! coro 'running)
+        ;; 设置为运行状态（除非已失败）
+        (unless is-failed?
+          (coroutine-state-set! coro 'running))
 
         ;; 清理 continuation（避免重复执行）
         (coroutine-continuation-set! coro #f)
@@ -293,8 +295,13 @@
             (if is-first-run?
                 ;; 首次运行（thunk）
                 (k)
-                ;; 恢复（传递结果）
-                (k (coroutine-result coro)))
+                ;; 恢复
+                (let ([result (coroutine-result coro)])
+                  (if (and (pair? result) (eq? (car result) 'promise-error))
+                      ;; 这是一个 Promise 错误，抛出它
+                      (raise (cdr result))
+                      ;; 正常结果，传递它
+                      (k result))))
             (error 'run-coroutine! "Invalid continuation" k)))))
 
   ;; ========================================
