@@ -199,13 +199,26 @@ scheme tests/test-async-simple.ss
 
 ## 🎯 后续工作（可选）
 
-### Phase 4: 高级特性（优先级：中）
-**预计时间：** 1-2 周
+### Phase 4: 高级特性（优先级：中）✨
+**状态：** 🟡 80% 完成
+**时间：** 2026-02-05（约 2 小时）
 
-可选功能：
-- [ ] 超时支持：`async-timeout`, `async-sleep`
-- [ ] 并发原语：`async-all`, `async-race`, `async-any`
+已完成功能：
+- ✅ 超时支持：`async-timeout`, `async-sleep`
+- ✅ 并发原语：`async-all`, `async-race`, `async-any`
+- ✅ 错误处理：`async-catch`, `async-finally`
+- ✅ 延迟操作：`async-delay`
+
+待完成：
 - [ ] 取消支持：`cancellation-token`
+- [ ] 修复 timeout 错误传播问题
+
+**成果：**
+- 8 个核心组合器函数
+- 570 行使用指南文档
+- 6/6 简单测试通过
+
+**文档：** `docs/phase4-progress.md`, `docs/async-combinators-guide.md`
 
 ### Phase 5: 优化与工具（优先级：低）
 **预计时间：** 1-2 周
