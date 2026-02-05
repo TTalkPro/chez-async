@@ -91,11 +91,11 @@
         ;; 空列表立即返回
         (promise-resolved (uv-default-loop) '())
         ;; 处理 Promise 列表
-        (let ([loop (uv-default-loop)]
-              [count (length promises)]
-              [results (make-vector (length promises) #f)]
-              [completed 0]
-              [failed? #f])
+        (let* ([count (length promises)]
+               [loop (uv-default-loop)]
+               [results (make-vector count #f)]
+               [completed 0]
+               [failed? #f])
           (make-promise loop
             (lambda (resolve reject)
               (let loop-promises ([ps promises] [index 0])
@@ -191,11 +191,11 @@
         (promise-rejected (uv-default-loop)
                          "async-any: empty promise list")
         ;; 处理 Promise 列表
-        (let ([loop (uv-default-loop)]
-              [count (length promises)]
-              [failed-count 0]
-              [errors (make-vector (length promises) #f)]
-              [settled? #f])
+        (let* ([count (length promises)]
+               [loop (uv-default-loop)]
+               [failed-count 0]
+               [errors (make-vector count #f)]
+               [settled? #f])
           (make-promise loop
             (lambda (resolve reject)
               (let loop-promises ([ps promises] [index 0])

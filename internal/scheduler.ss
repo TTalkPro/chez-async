@@ -42,37 +42,45 @@
           (chez-async ffi core))
 
   ;; ========================================
-  ;; 简单队列实现（FIFO）
+  ;; 双列表队列（FIFO，O(1) amortized enqueue/dequeue）
   ;; ========================================
+  ;;
+  ;; enqueue: cons 到 in 列表 — O(1)
+  ;; dequeue: 从 out 列表取；out 为空时 reverse in — O(1) amortized
 
   (define-record-type queue-record
     (fields
-      (mutable items))      ; (list item)
+      (mutable out)       ; 出队端（正序）
+      (mutable in))       ; 入队端（逆序，dequeue 时 reverse 转到 out）
     (protocol
       (lambda (new)
         (lambda ()
-          (new '())))))
+          (new '() '())))))
 
   (define (make-queue)
     "创建新的空队列"
     (make-queue-record))
 
   (define (queue-enqueue! q item)
-    "将元素加入队列尾部"
-    (queue-record-items-set! q (append (queue-record-items q) (list item))))
+    "将元素加入队列尾部 — O(1)"
+    (queue-record-in-set! q (cons item (queue-record-in q))))
 
   (define (queue-dequeue! q)
-    "从队列头部取出元素"
-    (let ([items (queue-record-items q)])
-      (if (null? items)
+    "从队列头部取出元素 — O(1) amortized"
+    (when (null? (queue-record-out q))
+      (if (null? (queue-record-in q))
           (error 'queue-dequeue! "Queue is empty")
-          (let ([item (car items)])
-            (queue-record-items-set! q (cdr items))
-            item))))
+          (begin
+            (queue-record-out-set! q (reverse (queue-record-in q)))
+            (queue-record-in-set! q '()))))
+    (let ([item (car (queue-record-out q))])
+      (queue-record-out-set! q (cdr (queue-record-out q)))
+      item))
 
   (define (queue-empty? q)
     "检查队列是否为空"
-    (null? (queue-record-items q)))
+    (and (null? (queue-record-out q))
+         (null? (queue-record-in q))))
 
   (define (queue-not-empty? q)
     "检查队列是否非空"
@@ -80,7 +88,8 @@
 
   (define (queue-size q)
     "获取队列大小"
-    (length (queue-record-items q)))
+    (+ (length (queue-record-out q))
+       (length (queue-record-in q))))
 
   ;; ========================================
   ;; 调度器状态
