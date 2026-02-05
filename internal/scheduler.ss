@@ -205,6 +205,7 @@
             ;; 1. 保存 continuation
             (coroutine-continuation-set! coro k)
             (coroutine-state-set! coro 'suspended)
+            (coroutine-awaiting-promise-set! coro promise)
 
             ;; 2. 注册到 pending 表
             (hashtable-set! (scheduler-state-pending sched) promise coro)
@@ -242,14 +243,11 @@
      value-or-error: Promise 的结果或错误
      is-error?: 是否为错误"
 
-    ;; 1. 从 pending 表中移除
-    (let ([pending (scheduler-state-pending sched)])
-      (let-values ([(keys vals) (hashtable-entries pending)])
-        (vector-for-each
-          (lambda (i)
-            (when (eq? (vector-ref vals i) coro)
-              (hashtable-delete! pending (vector-ref keys i))))
-          (list->vector (iota (vector-length keys))))))
+    ;; 1. 从 pending 表中移除（O(1)：用 coroutine 上缓存的 promise 直接删除）
+    (let ([promise (coroutine-awaiting-promise coro)])
+      (when promise
+        (hashtable-delete! (scheduler-state-pending sched) promise)
+        (coroutine-awaiting-promise-set! coro #f)))
 
     ;; 2. 设置结果（错误通过 value-or-error 的结构标记，见 run-coroutine!）
     (coroutine-state-set! coro 'running)
