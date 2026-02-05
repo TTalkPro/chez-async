@@ -76,10 +76,41 @@
   ;; 当前协程（线程局部变量）
   ;; ========================================
 
+  ;; ========================================
+  ;; 当前协程（线程局部变量）
+  ;; ========================================
+  ;;
+  ;; make-thread-parameter 是 Chez Scheme 的内置函数，用于创建线程局部参数
+  ;; 这是一种特殊的动态作用域变量，具有以下特点：
+  ;;
+  ;; 1. 每个线程都有独立的副本（线程安全）
+  ;; 2. 可以在线程内动态地设置和获取值
+  ;; 3. 支持参数验证（通过传入的 lambda 函数）
+  ;;
+  ;; 函数签名：(make-thread-parameter initial-value [validator])
+  ;;
+  ;; 参数说明：
+  ;;   - initial-value: 线程参数的初始值（默认值），这里设置为 #f 表示没有当前协程
+  ;;   - validator: 可选的验证器/转换器函数，当设置新值时自动调用
+  ;;
+  ;; 工作原理：
+  ;;   (current-coroutine)           ; 获取当前值
+  ;;   (current-coroutine some-coro) ; 设置新值，返回新值
+  ;;
+  ;; 验证器逻辑：
+  ;;   - 检查值是否为 #f 或 coroutine 类型
+  ;;   - 非法值会触发错误
+  ;;   - 验证通过后返回原值
+  ;;
+  ;; 在协程系统中的作用：
+  ;;   - 跟踪当前执行的协程
+  ;;   - 支持协程切换时的状态管理
+  ;;   - 提供类型安全保证
+
   (define current-coroutine
     (make-thread-parameter #f
       (lambda (v)
-        "设置/获取当前协程"
+        "验证器：检查值是否为 coroutine 或 #f"
         (unless (or (not v) (coroutine? v))
           (error 'current-coroutine "Value must be a coroutine or #f" v))
         v)))
