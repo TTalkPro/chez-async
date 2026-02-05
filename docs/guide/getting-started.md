@@ -1,48 +1,48 @@
-# Getting Started with chez-async
+# chez-async 快速入门
 
-## Installation
+## 安装
 
-### Prerequisites
+### 前置要求
 
-1. **Chez Scheme** (version 10.0 or higher recommended)
-2. **libuv** development package (version 1.x)
+1. **Chez Scheme**（推荐 10.0 或更高版本）
+2. **libuv** 开发包（1.x 版本）
 
-#### On Debian/Ubuntu:
+#### Debian/Ubuntu：
 
 ```bash
 sudo apt-get install chezscheme libuv1-dev
 ```
 
-#### On macOS:
+#### macOS：
 
 ```bash
 brew install chezscheme libuv
 ```
 
-#### On Fedora/RHEL:
+#### Fedora/RHEL：
 
 ```bash
 sudo dnf install chezscheme libuv-devel
 ```
 
-#### On FreeBSD:
+#### FreeBSD：
 
 ```bash
 sudo pkg install chez-scheme libuv
 ```
 
-### Verify Installation
+### 验证安装
 
-Check versions:
+检查版本：
 
 ```bash
 scheme --version
 pkg-config --modversion libuv
 ```
 
-## Your First Program
+## 第一个程序
 
-Create a file `hello-timer.ss`:
+创建文件 `hello-timer.ss`：
 
 ```scheme
 #!/usr/bin/env scheme-script
@@ -50,146 +50,149 @@ Create a file `hello-timer.ss`:
 (import (chezscheme)
         (chez-async))
 
-;; Create event loop
+;; 创建事件循环
 (define loop (uv-loop-init))
 
-;; Create timer
+;; 创建定时器
 (define timer (uv-timer-init loop))
 
-;; Inspect handle (using simplified API)
+;; 查看句柄信息（使用简化 API）
 (printf "Timer type: ~a~n" (handle-type timer))
 (printf "Is closed?: ~a~n" (handle-closed? timer))
 
-;; Start timer (fires after 1 second)
+;; 启动定时器（1 秒后触发）
 (uv-timer-start! timer 1000 0
   (lambda (t)
     (printf "Hello from chez-async!~n")
     (uv-handle-close! t)))
 
-;; Run event loop
+;; 运行事件循环
 (uv-run loop 'default)
 
-;; Cleanup
+;; 清理
 (uv-loop-close loop)
 ```
 
-Run it:
+运行：
 
 ```bash
 chmod +x hello-timer.ss
 ./hello-timer.ss
 ```
 
-Output:
+输出：
 ```
 Timer type: timer
 Is closed?: #f
 Hello from chez-async!
 ```
 
-## Core Concepts
+## 核心概念
 
-### Event Loop
+### 事件循环
 
-The event loop is the heart of libuv. It runs continuously, processing I/O events and executing callbacks.
+事件循环是 libuv 的核心。它持续运行，处理 I/O 事件并执行回调。
 
 ```scheme
-;; Create a new event loop
+;; 创建新的事件循环
 (define loop (uv-loop-init))
 
-;; Run the loop (blocks until no more events)
+;; 运行事件循环（阻塞直到没有更多事件）
 (uv-run loop 'default)
 
-;; Clean up
+;; 清理
 (uv-loop-close loop)
 ```
 
-### Run Modes
+### 运行模式
 
-- `'default` - Run until there are no more active handles
-- `'once` - Process one event (may block)
-- `'nowait` - Process events without blocking
+- `'default` - 运行直到没有活跃的句柄
+- `'once` - 处理一个事件（可能阻塞）
+- `'nowait` - 处理事件但不阻塞
 
-Example:
+示例：
 ```scheme
-;; Run once and return
+;; 运行一次并返回
 (uv-run loop 'once)
 
-;; Poll without blocking
+;; 不阻塞地轮询
 (uv-run loop 'nowait)
 ```
 
-### Handles
+### 句柄
 
-Handles are long-lived objects that perform I/O operations:
+句柄是执行 I/O 操作的长期存活对象：
 
-- **Timer** - Scheduled callbacks ✅
-- **Async** - Thread-safe wakeup ✅
-- **TCP** - TCP sockets (coming soon)
-- **UDP** - UDP sockets (coming soon)
-- **Pipe** - Named pipes (coming soon)
+- **Timer** - 定时回调 ✅
+- **Async** - 线程安全唤醒 ✅
+- **TCP** - TCP 套接字 ✅
+- **UDP** - UDP 套接字 ✅
+- **Pipe** - 命名管道 ✅
+- **TTY** - 终端 ✅
+- **Signal** - 信号处理 ✅
+- **Process** - 进程管理 ✅
 
-#### Simplified Handle API
+#### 简化句柄 API
 
-chez-async provides simplified accessors for handles:
+chez-async 提供了简化的句柄访问器：
 
 ```scheme
 (define timer (uv-timer-init loop))
 
-;; Simplified API (recommended)
-(handle-type timer)        ; Returns: 'timer
-(handle? timer)            ; Returns: #t
-(handle-closed? timer)     ; Returns: #f
-(handle-data timer)        ; Get associated data
-(handle-data-set! timer data)  ; Store custom data
+;; 简化 API（推荐）
+(handle-type timer)        ; 返回: 'timer
+(handle? timer)            ; 返回: #t
+(handle-closed? timer)     ; 返回: #f
+(handle-data timer)        ; 获取关联数据
+(handle-data-set! timer data)  ; 存储自定义数据
 
-;; Full names also available (backward compatible)
+;; 完整名称也可用（向后兼容）
 (uv-handle-wrapper-type timer)
 (uv-handle-wrapper? timer)
-;; etc.
+;; 等等
 ```
 
-All handles must be closed:
+所有句柄使用完毕必须关闭：
 
 ```scheme
 (uv-handle-close! handle [optional-callback])
 ```
 
-### Callbacks
+### 回调
 
-Callbacks are executed when events occur:
+事件发生时执行回调：
 
 ```scheme
 (uv-timer-start! timer 1000 0
   (lambda (timer-handle)
-    ;; This runs when the timer fires
+    ;; 定时器触发时运行
     (printf "Timer fired!~n")
 
-    ;; Access handle data
+    ;; 访问句柄数据
     (let ([data (handle-data timer-handle)])
       (printf "Data: ~a~n" data))))
 ```
 
-### Storing Custom Data
+### 存储自定义数据
 
-Use `handle-data` to associate custom data with handles:
+使用 `handle-data` 将自定义数据与句柄关联：
 
 ```scheme
 (define timer (uv-timer-init loop))
 
-;; Store custom data
+;; 存储自定义数据
 (handle-data-set! timer '(count 0 name "my-timer"))
 
-;; Retrieve in callback
+;; 在回调中读取
 (uv-timer-start! timer 1000 0
   (lambda (t)
     (let ([data (handle-data t)])
       (printf "Timer data: ~s~n" data))))
 ```
 
-## Error Handling
+## 错误处理
 
-All errors raise a `&uv-error` condition:
+所有错误抛出 `&uv-error` 条件：
 
 ```scheme
 (guard (e [(uv-error? e)
@@ -199,47 +202,47 @@ All errors raise a `&uv-error` condition:
   (uv-timer-start! timer 1000 0 callback))
 ```
 
-Common error codes:
-- `EINVAL` - Invalid argument
-- `ENOMEM` - Out of memory
-- `EBADF` - Bad file descriptor
+常见错误码：
+- `EINVAL` - 无效参数
+- `ENOMEM` - 内存不足
+- `EBADF` - 无效的文件描述符
 
-## Memory Management
+## 内存管理
 
-chez-async automatically manages memory:
+chez-async 自动管理内存：
 
-1. Objects are locked to prevent GC while in use
-2. Objects are unlocked when handles are closed
-3. Always close handles when done
+1. 使用中的对象会被锁定防止 GC 回收
+2. 句柄关闭时对象会被解锁
+3. 使用完毕后始终关闭句柄
 
 ```scheme
-;; Good practice
+;; 良好实践
 (define timer (uv-timer-init loop))
 (uv-timer-start! timer 1000 0
   (lambda (t)
-    ;; Do work...
-    (uv-handle-close! t)))  ;; Always close!
+    ;; 做一些工作...
+    (uv-handle-close! t)))  ;; 始终关闭！
 
-;; With cleanup callback
+;; 带清理回调
 (uv-handle-close! timer
   (lambda (h)
     (printf "Timer closed~n")))
 ```
 
-## Async Work (Background Tasks)
+## 异步任务（后台任务）
 
-Process CPU-intensive tasks in background threads:
+在后台线程中处理 CPU 密集型任务：
 
 ```scheme
 (define loop (uv-loop-init))
 
-;; Submit background work
+;; 提交后台任务
 (async-work loop
   (lambda ()
-    ;; This runs in a worker thread
+    ;; 在工作线程中运行
     (expensive-computation))
   (lambda (result)
-    ;; This runs in the main thread
+    ;; 在主线程中运行
     (printf "Result: ~a~n" result)
     (uv-stop loop)))
 
@@ -247,62 +250,62 @@ Process CPU-intensive tasks in background threads:
 (uv-loop-close loop)
 ```
 
-See [Async Work Guide](async-work.md) for details.
+详见 [异步任务指南](async-work.md)。
 
-## API Style
+## API 风格
 
-### Naming Conventions
+### 命名约定
 
-chez-async provides two naming styles:
+chez-async 提供两种命名风格：
 
-**Simplified (Recommended)**:
-- Shorter, more Scheme-like
-- Example: `handle-type`, `handle-data-set!`
+**简化版（推荐）**：
+- 更短、更 Scheme 风格
+- 示例：`handle-type`、`handle-data-set!`
 
-**Full Names (Backward Compatible)**:
-- Original verbose names
-- Example: `uv-handle-wrapper-type`, `uv-handle-wrapper-scheme-data-set!`
+**完整名称（向后兼容）**：
+- 原始详细名称
+- 示例：`uv-handle-wrapper-type`、`uv-handle-wrapper-scheme-data-set!`
 
-Both styles work identically. Choose based on preference.
+两种风格功能完全相同，根据偏好选择。
 
-### Function Naming Patterns
+### 函数命名模式
 
-- `foo?` - Predicate (returns boolean)
-- `foo!` - Mutating operation (has side effects)
-- `foo-set!` - Setter function
-- `make-foo` - Constructor
+- `foo?` - 谓词（返回布尔值）
+- `foo!` - 修改操作（有副作用）
+- `foo-set!` - 设置函数
+- `make-foo` - 构造函数
 
-## Best Practices
+## 最佳实践
 
-### 1. Always Close Handles
+### 1. 始终关闭句柄
 
 ```scheme
-;; Bad
+;; 错误
 (define timer (uv-timer-init loop))
 (uv-timer-start! timer 1000 0 callback)
-;; Forgot to close!
+;; 忘记关闭！
 
-;; Good
+;; 正确
 (uv-timer-start! timer 1000 0
   (lambda (t)
     (do-work)
-    (uv-handle-close! t)))  ;; Close when done
+    (uv-handle-close! t)))  ;; 完成后关闭
 ```
 
-### 2. Use Error Handlers
+### 2. 使用错误处理
 
 ```scheme
-;; Good practice
+;; 良好实践
 (guard (e [else
            (fprintf (current-error-port)
                    "Error: ~a~n" e)])
   (uv-run loop 'default))
 ```
 
-### 3. Clean Up Properly
+### 3. 正确清理
 
 ```scheme
-;; Always clean up the event loop
+;; 始终清理事件循环
 (define loop (uv-loop-init))
 (guard (e [else
            (uv-loop-close loop)
@@ -311,13 +314,13 @@ Both styles work identically. Choose based on preference.
 (uv-loop-close loop)
 ```
 
-## Common Patterns
+## 常见模式
 
-### Repeating Timer
+### 重复定时器
 
 ```scheme
 (define count 0)
-(uv-timer-start! timer 0 1000  ; Start immediately, repeat every 1s
+(uv-timer-start! timer 0 1000  ; 立即开始，每秒重复
   (lambda (t)
     (set! count (+ count 1))
     (printf "Tick ~a~n" count)
@@ -326,7 +329,7 @@ Both styles work identically. Choose based on preference.
       (uv-handle-close! t))))
 ```
 
-### Multiple Timers
+### 多个定时器
 
 ```scheme
 (define timer1 (uv-timer-init loop))
@@ -338,33 +341,33 @@ Both styles work identically. Choose based on preference.
 (uv-run loop 'default)
 ```
 
-### Background Computation
+### 后台计算
 
 ```scheme
 (async-work loop
   (lambda ()
-    ;; Heavy computation in worker thread
+    ;; 在工作线程中进行繁重计算
     (compute-fibonacci 40))
   (lambda (result)
-    ;; Result handling in main thread
+    ;; 在主线程中处理结果
     (printf "Fibonacci: ~a~n" result)))
 ```
 
-## Debugging Tips
+## 调试技巧
 
-### Enable Debug Logging
+### 启用调试日志
 
 ```scheme
 (import (chez-async internal utils))
 
-;; Enable debug output
+;; 启用调试输出
 (debug-enabled? #t)
 
-;; Use debug logging
+;; 使用调试日志
 (debug-log "Timer created: ~a~n" timer)
 ```
 
-### Check Handle State
+### 检查句柄状态
 
 ```scheme
 (printf "Active?: ~a~n" (uv-handle-active? timer))
@@ -372,15 +375,15 @@ Both styles work identically. Choose based on preference.
 (printf "Has ref?: ~a~n" (uv-handle-has-ref? timer))
 ```
 
-## Next Steps
+## 下一步
 
-- Read the [Async Work Guide](async-work.md)
-- Check the [Timer API Reference](../api/timer.md)
-- Explore [Examples](../../examples/)
-- Browse the source code for advanced usage
+- 阅读 [异步任务指南](async-work.md)
+- 查看 [Timer API 参考](../api/timer.md)
+- 探索 [示例代码](../../examples/)
+- 浏览源代码了解高级用法
 
-## Getting Help
+## 获取帮助
 
-- GitHub Issues: Report bugs or ask questions
-- Examples directory: Working code samples
-- API documentation: Detailed reference
+- GitHub Issues：报告 bug 或提问
+- examples 目录：可运行的代码示例
+- API 文档：详细参考

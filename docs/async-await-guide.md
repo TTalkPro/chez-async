@@ -690,21 +690,21 @@ Result: 42
 
 ### B. 完整示例程序
 
-见 `examples/async-await-cc-demo.ss`
+- `examples/async-await-demo-full.ss` - 完整 async/await 示例
+- `examples/async-real-world-demo.ss` - 实际应用示例
 
 ### C. 测试套件
 
 - `tests/test-coroutine.ss` - 协程基础测试
-- `tests/test-async-await-cc.ss` - async/await 测试
-- `tests/test-async-simple.ss` - 简化测试
+- `tests/test-async-simple.ss` - async/await 简化测试
+- `tests/test-async-combinators.ss` - 组合器测试
+- `tests/test-cancellation.ss` - 取消机制测试
 
 ### D. 技术文档
 
-- `docs/implementation-plan.md` - 实现方案
-- `docs/phase1-complete.md` - Phase 1 完成报告
-- `docs/phase2-complete.md` - Phase 2 完成报告
-- `docs/phase3-complete.md` - Phase 3 完成报告
-- `docs/chez-socket-design-analysis.md` - 设计分析
+- [async 宏实现详解](async-implementation-explained.md) - async/await 底层原理
+- [Promise 实现详解](promise-implementation-explained.md) - Promise 状态机和回调机制
+- [调度器架构](scheduler-architecture.md) - Loop、Scheduler 和 Pending 队列关联
 
 ---
 
