@@ -36,7 +36,7 @@
           (chez-async ffi poll)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal handle-utils))
@@ -132,6 +132,10 @@
        error 参数：#f 表示成功，否则为错误对象。
        events 参数：触发的事件掩码（可能与请求的不同）。"
     (with-handle-check poll uv-poll-start!
+      ;; 释放旧回调
+      (let ([old-callback (handle-data poll)])
+        (when old-callback
+          (unlock-object old-callback)))
       ;; 保存用户回调
       (handle-data-set! poll callback)
       (lock-object callback)
@@ -141,22 +145,7 @@
                             events
                             (get-poll-callback)))))
 
-  (define (uv-poll-stop! poll)
-    "停止轮询
-
-     参数：
-       poll - Poll 句柄
-
-     说明：
-       停止后可以通过 uv-poll-start! 重新开始轮询。
-       停止会清理之前注册的回调。"
-    (with-handle-check poll uv-poll-stop!
-      (with-uv-check uv-poll-stop
-        (%ffi-uv-poll-stop (handle-ptr poll)))
-      ;; 清理回调
-      (let ([callback (handle-data poll)])
-        (when callback
-          (unlock-object callback)
-          (handle-data-set! poll #f)))))
+  (define-handle-stop! uv-poll-stop! %ffi-uv-poll-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
 ) ; end library

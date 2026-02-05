@@ -51,7 +51,7 @@
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
           (chez-async low-level pipe)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal utils))

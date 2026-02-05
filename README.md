@@ -40,7 +40,7 @@
 - ✅ 读写模式提取（2 个文件简化）
 - ✅ 全部 39 个测试通过
 
-详见：[Phase 4 报告](docs/phase4-complete.md) | [重构报告](docs/REFACTORING-COMPLETE.md)
+详见：[项目状态](PROJECT-STATUS.md)
 
 ---
 
@@ -490,44 +490,95 @@ chez-async/
 │   ├── promise.ss            # Promise 实现
 │   ├── async-await.ss        # async/await 宏
 │   ├── async-combinators.ss  # 组合器
-│   └── cancellation.ss       # 取消令牌
+│   ├── async-work.ss         # 异步任务（线程池）
+│   ├── cancellation.ss       # 取消令牌
+│   ├── event-loop.ss         # 事件循环封装
+│   └── stream.ss             # 高级 Stream API
 │
 ├── internal/                 # 内部实现
 │   ├── scheduler.ss          # 协程调度器
+│   ├── coroutine.ss          # 协程数据结构
+│   ├── promise-core.ss       # Promise 核心类型
+│   ├── loop-registry.ss      # 事件循环注册表
+│   ├── callback-registry.ss  # 回调注册
 │   ├── macros.ss             # 宏工具
+│   ├── handle-utils.ss       # 句柄工具宏
 │   ├── buffer-utils.ss       # 缓冲区工具
-│   └── macro-enhancements.ss # 增强宏
+│   ├── foreign-utils.ss      # FFI 工具函数
+│   └── utils.ss              # 通用工具
 │
 ├── low-level/                # libuv 封装
 │   ├── tcp.ss                # TCP 套接字
 │   ├── udp.ss                # UDP 套接字
 │   ├── stream.ss             # Stream 操作
+│   ├── pipe.ss               # 管道
+│   ├── tty.ss                # 终端
+│   ├── timer.ss              # 定时器
 │   ├── fs.ss                 # 文件系统
 │   ├── dns.ss                # DNS 解析
-│   └── timer.ss              # 定时器
+│   ├── signal.ss             # 信号处理
+│   ├── process.ss            # 进程管理
+│   ├── poll.ss               # 轮询
+│   ├── threadpool.ss         # 线程池
+│   ├── handle-base.ss        # 句柄基础
+│   ├── request-base.ss       # 请求基础
+│   └── sockaddr.ss           # 地址处理
 │
 ├── ffi/                      # FFI 绑定
-│   ├── types.ss              # C 类型
+│   ├── types.ss              # C 类型定义
 │   ├── core.ss               # 核心函数
+│   ├── handles.ss            # 句柄 FFI
+│   ├── callbacks.ss          # 回调 FFI
 │   ├── tcp.ss                # TCP FFI
-│   └── fs.ss                 # FS FFI
+│   ├── udp.ss                # UDP FFI
+│   ├── stream.ss             # Stream FFI
+│   ├── pipe.ss               # Pipe FFI
+│   ├── tty.ss                # TTY FFI
+│   ├── timer.ss              # Timer FFI
+│   ├── fs.ss                 # FS FFI
+│   ├── dns.ss                # DNS FFI
+│   ├── signal.ss             # Signal FFI
+│   ├── process.ss            # Process FFI
+│   └── poll.ss               # Poll FFI
 │
 ├── tests/                    # 测试套件
-│   ├── test-tcp.ss
-│   ├── test-async.ss
-│   └── test-cancellation.ss
+│   ├── test-tcp.ss           # TCP 测试
+│   ├── test-udp.ss           # UDP 测试
+│   ├── test-pipe.ss          # Pipe 测试
+│   ├── test-promise.ss       # Promise 测试
+│   ├── test-stream-high.ss   # Stream 测试
+│   ├── test-coroutine.ss     # 协程测试
+│   ├── test-cancellation.ss  # 取消机制测试
+│   └── ...                   # 更多测试文件
 │
 ├── examples/                 # 示例代码
-│   ├── tcp-echo-server.ss
-│   └── async-parallel.ss
+│   ├── tcp-echo-server.ss    # TCP Echo 服务器
+│   ├── tcp-echo-client.ss    # TCP Echo 客户端
+│   ├── udp-echo-server.ss    # UDP Echo 服务器
+│   ├── async-work-demo.ss    # 异步任务示例
+│   ├── promise-demo.ss       # Promise 示例
+│   ├── timer-demo.ss         # 定时器示例
+│   ├── dns-lookup.ss         # DNS 查询示例
+│   ├── fs-demo.ss            # 文件系统示例
+│   ├── pipe-ipc.ss           # 管道 IPC 示例
+│   └── signal-handler.ss     # 信号处理示例
 │
 └── docs/                     # 文档
-    ├── async-await-guide.md
-    ├── async-combinators-guide.md
-    ├── cancellation-guide.md
+    ├── README.md             # 文档索引
+    ├── async-await-guide.md  # async/await 指南
+    ├── async-combinators-guide.md  # 组合器指南
+    ├── cancellation-guide.md       # 取消机制指南
+    ├── tcp-with-async-await.md     # TCP 编程指南
+    ├── scheduler-architecture.md   # 调度器架构
+    ├── async-implementation-explained.md  # async 实现详解
+    ├── promise-implementation-explained.md # Promise 实现详解
+    ├── guide/
+    │   ├── getting-started.md  # 快速入门
+    │   └── async-work.md       # 异步任务指南
     └── api/
-        ├── tcp.md
-        └── timer.md
+        ├── README.md           # API 索引
+        ├── tcp.md              # TCP API
+        └── timer.md            # Timer API
 ```
 
 ---
@@ -565,21 +616,24 @@ chez-async/
 
 ### 使用指南
 
-- **[Getting Started](docs/guide/getting-started.md)** - 快速入门
-- **[async/await Guide](docs/async-await-guide.md)** - async/await 完整指南
-- **[Async Combinators Guide](docs/async-combinators-guide.md)** - 组合器使用
-- **[Cancellation Guide](docs/cancellation-guide.md)** - 取消机制
-- **[TCP with async/await](docs/tcp-with-async-await.md)** - TCP 编程指南
+- **[快速入门](docs/guide/getting-started.md)** - 安装和第一个程序
+- **[async/await 指南](docs/async-await-guide.md)** - async/await 完整使用指南
+- **[组合器指南](docs/async-combinators-guide.md)** - 并发控制组合器
+- **[取消机制指南](docs/cancellation-guide.md)** - 取消令牌使用
+- **[TCP 编程指南](docs/tcp-with-async-await.md)** - 使用 async/await 进行 TCP 编程
+- **[异步任务指南](docs/guide/async-work.md)** - 线程池和后台任务
 
 ### 实现原理
 
-- **[async Implementation](docs/async-implementation-explained.md)** - async 宏实现详解
-- **[Promise Implementation](docs/promise-implementation-explained.md)** - Promise 实现详解
+- **[async 宏实现详解](docs/async-implementation-explained.md)** - async/await 底层原理
+- **[Promise 实现详解](docs/promise-implementation-explained.md)** - Promise 状态机和回调机制
+- **[调度器架构](docs/scheduler-architecture.md)** - Loop、Scheduler 和 Pending 队列关联
 
 ### API 参考
 
 - **[Timer API](docs/api/timer.md)** - 定时器 API
 - **[TCP API](docs/api/tcp.md)** - TCP 套接字 API
+- **[API 索引](docs/api/README.md)** - 完整 API 文档索引
 
 完整文档索引：[docs/README.md](docs/README.md)
 

@@ -45,10 +45,11 @@
       (immutable success?)        ; #t = 成功, #f = 失败
       (immutable value)))         ; 结果值或错误对象
 
-  ;; 任务队列记录类型
+  ;; 任务队列记录类型（双列表 FIFO，O(1) amortized push/pop）
   (define-record-type (task-queue make-task-queue-record task-queue?)
     (fields
-      (mutable items)             ; List of tasks
+      (mutable out)               ; 出队端（正序）
+      (mutable in)                ; 入队端（逆序）
       (immutable mutex)           ; Mutex for thread safety
       (immutable not-empty)))     ; Condition variable
 
@@ -73,25 +74,38 @@
   (define (make-task-queue)
     "创建新的任务队列"
     (make-task-queue-record
-      '()                         ; items
+      '()                         ; out
+      '()                         ; in
       (make-mutex)                ; mutex
       (make-condition)))          ; not-empty
 
+  (define (task-queue-empty? q)
+    "检查队列是否为空（调用方需持有 mutex）"
+    (and (null? (task-queue-out q))
+         (null? (task-queue-in q))))
+
   (define (queue-push! q item)
-    "添加项到队列（线程安全）"
+    "添加项到队列（线程安全）— O(1)"
     (with-mutex (task-queue-mutex q)
-      (task-queue-items-set! q (append (task-queue-items q) (list item)))
+      (task-queue-in-set! q (cons item (task-queue-in q)))
       (condition-signal (task-queue-not-empty q))))
+
+  (define (task-queue-pop-internal! q)
+    "内部 pop（调用方需持有 mutex）— O(1) amortized"
+    (when (null? (task-queue-out q))
+      (task-queue-out-set! q (reverse (task-queue-in q)))
+      (task-queue-in-set! q '()))
+    (let ([item (car (task-queue-out q))])
+      (task-queue-out-set! q (cdr (task-queue-out q)))
+      item))
 
   (define (queue-try-pop! q timeout-ms)
     "尝试从队列获取项（带超时，毫秒）"
     (with-mutex (task-queue-mutex q)
       (let loop ([remaining-ms timeout-ms])
         (cond
-          [(not (null? (task-queue-items q)))
-           (let ([item (car (task-queue-items q))])
-             (task-queue-items-set! q (cdr (task-queue-items q)))
-             item)]
+          [(not (task-queue-empty? q))
+           (task-queue-pop-internal! q)]
           [(<= remaining-ms 0)
            #f]
           [else
@@ -110,9 +124,11 @@
   (define (queue-pop-all! q)
     "获取并清空队列中的所有项"
     (with-mutex (task-queue-mutex q)
-      (let ([items (task-queue-items q)])
-        (task-queue-items-set! q '())
-        items)))
+      (let ([out (task-queue-out q)]
+            [in (task-queue-in q)])
+        (task-queue-out-set! q '())
+        (task-queue-in-set! q '())
+        (append out (reverse in)))))
 
   ;; ========================================
   ;; 工作线程

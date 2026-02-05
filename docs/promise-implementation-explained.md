@@ -543,6 +543,139 @@ promise
    p3.value = 25
    ```
 
+### 场景：Promise resolve 与协程调度器的完整链路
+
+这是 `await` 背后最关键的流程——从 libuv I/O 事件到协程恢复的完整链路。
+
+以 `async-sleep` 为例：
+
+```scheme
+(async
+  (await (async-sleep 1000))
+  (printf "Done~n"))
+```
+
+**阶段 1：创建 Promise，executor 把 resolve 藏在 libuv 回调里**
+
+```scheme
+;; async-sleep 内部
+(make-promise loop
+  (lambda (resolve reject)
+    (let ([timer (uv-timer-init loop)])
+      (uv-timer-start! timer 1000 0
+        (lambda (t)                    ; ← libuv 定时器回调
+          (uv-handle-close! t)
+          (resolve (void)))))))        ; ← resolve 被藏在这里
+```
+
+此时 Promise 处于 pending 状态，`resolve` 闭包捕获了这个 Promise 对象。
+
+**阶段 2：await 注册 on-fulfilled 回调**
+
+`suspend-for-promise!` 调用 `promise-then` 注册回调：
+
+```scheme
+(promise-then promise
+  (lambda (value)
+    (resume-coroutine! sched coro value #f))    ; ← on-fulfilled 回调
+  (lambda (error)
+    (resume-coroutine! sched coro ... #t)))
+```
+
+因为 Promise 还是 pending，回调被追加到 `on-fulfilled` 列表：
+
+```
+promise = {
+  state: 'pending,
+  on-fulfilled: [resume-coroutine!-wrapper],
+  on-rejected:  [resume-coroutine!-wrapper]
+}
+```
+
+**阶段 3：协程挂起，跳回调度器**
+
+```scheme
+(scheduler-k (void))   ; 跳回调度器主循环
+```
+
+调度器继续执行其他协程，或者运行 `(uv-run loop 'once)` 等待 I/O。
+
+**阶段 4：libuv 定时器到期，触发 resolve**
+
+1000ms 后，`uv-run` 执行定时器回调：
+
+```
+libuv 定时器到期
+  → 回调: (lambda (t) ... (resolve (void)))
+    → resolve 调用 fulfill-promise!
+```
+
+**阶段 5：fulfill-promise! 调度已注册的回调**
+
+```scheme
+(fulfill-promise! promise (void))
+  ;; 状态: pending → fulfilled
+  ;; 遍历 on-fulfilled 列表，每个回调用 schedule-microtask 调度
+  (schedule-microtask loop
+    (lambda () (resume-coroutine! sched coro (void) #f)))
+```
+
+注意这里用了 `schedule-microtask`（0ms 定时器），不是直接调用。
+
+**阶段 6：0ms 定时器触发 resume-coroutine!**
+
+下一次 `uv-run` 迭代执行 0ms 定时器：
+
+```scheme
+(resume-coroutine! sched coro (void) #f)
+  ;; 从 pending 表移除协程
+  ;; 协程放入 runnable 队列
+```
+
+**阶段 7：调度器取出协程，恢复执行**
+
+```scheme
+(run-coroutine! sched coro)
+  ;; 调用保存的 continuation: (k (void))
+  ;; 协程从 await 处恢复，(void) 成为 await 的返回值
+  ;; 继续执行 (printf "Done~n")
+```
+
+**完整链路图**：
+
+```
+用户代码: (await (async-sleep 1000))
+  │
+  ├─ make-promise: resolve 闭包 → 藏在 timer 回调里
+  ├─ promise-then: resume-coroutine! → 注册到 on-fulfilled 列表
+  ├─ call/cc: 保存协程 continuation
+  └─ scheduler-k: 跳回调度器
+       │
+       └─ (uv-run loop 'once) × N 次
+            │
+            └─ 1000ms 后 timer 到期
+                 │
+                 └─ (resolve (void))
+                      │
+                      └─ fulfill-promise!
+                           │
+                           ├─ state: pending → fulfilled
+                           └─ schedule-microtask: resume-coroutine!
+                                │
+                                └─ 0ms timer 触发
+                                     │
+                                     └─ resume-coroutine!
+                                          │
+                                          ├─ pending 表移除
+                                          └─ runnable 队列入队
+                                               │
+                                               └─ run-coroutine!
+                                                    │
+                                                    └─ (k (void))
+                                                         │
+                                                         └─ await 返回，继续执行
+```
+
 ---
 
 ## 💡 设计亮点

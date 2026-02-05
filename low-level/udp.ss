@@ -62,7 +62,7 @@
           (chez-async low-level handle-base)
           (chez-async low-level request-base)
           (chez-async low-level sockaddr)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (only (chez-async internal buffer-utils) foreign->bytevector)

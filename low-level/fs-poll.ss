@@ -27,7 +27,7 @@
           (chez-async ffi fs-poll)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal utils))
@@ -49,18 +49,9 @@
   ;; FS Poll 句柄操作
   ;; ========================================
 
-  (define (uv-fs-poll-init loop)
-    "初始化 fs-poll 句柄
-     loop: 事件循环
-     返回: fs-poll 句柄包装器"
-    (let* ([size (%ffi-uv-fs-poll-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (let ([result (%ffi-uv-fs-poll-init loop-ptr ptr)])
-        (when (< result 0)
-          (foreign-free ptr)
-          (raise-uv-error 'uv-fs-poll-init result))
-        (make-handle ptr 'fs-poll loop))))
+  (define-handle-init uv-fs-poll-init fs-poll
+    %ffi-uv-fs-poll-size %ffi-uv-fs-poll-init
+    uv-loop-ptr allocate-handle make-handle)
 
   (define (uv-fs-poll-start! fs-poll path callback interval)
     "开始轮询文件状态
@@ -85,13 +76,8 @@
                               path
                               interval)))
 
-  (define (uv-fs-poll-stop! fs-poll)
-    "停止轮询
-     fs-poll: fs-poll 句柄包装器"
-    (when (handle-closed? fs-poll)
-      (error 'uv-fs-poll-stop! "fs-poll handle is closed"))
-    (with-uv-check uv-fs-poll-stop
-      (%ffi-uv-fs-poll-stop (handle-ptr fs-poll))))
+  (define-handle-stop! uv-fs-poll-stop! %ffi-uv-fs-poll-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
   (define (uv-fs-poll-getpath fs-poll)
     "获取被轮询的路径

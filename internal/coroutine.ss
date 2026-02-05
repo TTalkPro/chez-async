@@ -18,6 +18,8 @@
     coroutine-result
     coroutine-result-set!
     coroutine-loop
+    coroutine-awaiting-promise
+    coroutine-awaiting-promise-set!
 
     ;; 当前协程（线程局部变量）
     current-coroutine
@@ -64,13 +66,14 @@
       (mutable state)             ; 协程状态
       (mutable continuation)      ; call/cc 捕获的 continuation
       (mutable result)            ; 执行结果或错误
-      (immutable loop))           ; 关联的 uv-loop
+      (immutable loop)            ; 关联的 uv-loop
+      (mutable awaiting-promise)) ; 当前等待的 Promise（用于 O(1) 反查）
     (protocol
       (lambda (new)
         (lambda (loop)
           "创建新协程
            loop: 关联的事件循环"
-          (new (generate-coroutine-id) 'created #f #f loop)))))
+          (new (generate-coroutine-id) 'created #f #f loop #f)))))
 
   ;; ========================================
   ;; 当前协程（线程局部变量）

@@ -85,7 +85,8 @@
           (chez-async ffi requests)
           (chez-async ffi callbacks)
           (chez-async low-level request-base)
-          (chez-async high-level event-loop)
+          (chez-async ffi core)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (only (chez-async internal foreign-utils) c-string->string)  ; 只导入 c-string->string
@@ -751,7 +752,7 @@
                (set! done #t)))
       (let loop-run ()
         (unless done
-          (uv-run loop 'once)
+          (%ffi-uv-run (uv-loop-ptr loop) (uv-run-mode->int 'once))
           (loop-run)))
       (if error
           (raise error)

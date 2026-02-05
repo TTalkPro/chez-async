@@ -34,7 +34,7 @@
           (chez-async ffi fs-event)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal utils))
@@ -55,18 +55,9 @@
   ;; FS Event 句柄操作
   ;; ========================================
 
-  (define (uv-fs-event-init loop)
-    "初始化 fs-event 句柄
-     loop: 事件循环
-     返回: fs-event 句柄包装器"
-    (let* ([size (%ffi-uv-fs-event-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (let ([result (%ffi-uv-fs-event-init loop-ptr ptr)])
-        (when (< result 0)
-          (foreign-free ptr)
-          (raise-uv-error 'uv-fs-event-init result))
-        (make-handle ptr 'fs-event loop))))
+  (define-handle-init uv-fs-event-init fs-event
+    %ffi-uv-fs-event-size %ffi-uv-fs-event-init
+    uv-loop-ptr allocate-handle make-handle)
 
   (define uv-fs-event-start!
     (case-lambda
@@ -98,13 +89,8 @@
                                   path
                                   flags))]))
 
-  (define (uv-fs-event-stop! fs-event)
-    "停止监视
-     fs-event: fs-event 句柄包装器"
-    (when (handle-closed? fs-event)
-      (error 'uv-fs-event-stop! "fs-event handle is closed"))
-    (with-uv-check uv-fs-event-stop
-      (%ffi-uv-fs-event-stop (handle-ptr fs-event))))
+  (define-handle-stop! uv-fs-event-stop! %ffi-uv-fs-event-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
   (define (uv-fs-event-getpath fs-event)
     "获取被监视的路径

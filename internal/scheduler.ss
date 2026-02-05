@@ -36,41 +36,51 @@
 
   (import (chezscheme)
           (chez-async internal coroutine)
-          (chez-async high-level promise)
-          (chez-async high-level event-loop))
+          (chez-async internal promise-core)
+          (chez-async internal loop-registry)
+          (chez-async ffi types)
+          (chez-async ffi core))
 
   ;; ========================================
-  ;; 简单队列实现（FIFO）
+  ;; 双列表队列（FIFO，O(1) amortized enqueue/dequeue）
   ;; ========================================
+  ;;
+  ;; enqueue: cons 到 in 列表 — O(1)
+  ;; dequeue: 从 out 列表取；out 为空时 reverse in — O(1) amortized
 
   (define-record-type queue-record
     (fields
-      (mutable items))      ; (list item)
+      (mutable out)       ; 出队端（正序）
+      (mutable in))       ; 入队端（逆序，dequeue 时 reverse 转到 out）
     (protocol
       (lambda (new)
         (lambda ()
-          (new '())))))
+          (new '() '())))))
 
   (define (make-queue)
     "创建新的空队列"
     (make-queue-record))
 
   (define (queue-enqueue! q item)
-    "将元素加入队列尾部"
-    (queue-record-items-set! q (append (queue-record-items q) (list item))))
+    "将元素加入队列尾部 — O(1)"
+    (queue-record-in-set! q (cons item (queue-record-in q))))
 
   (define (queue-dequeue! q)
-    "从队列头部取出元素"
-    (let ([items (queue-record-items q)])
-      (if (null? items)
+    "从队列头部取出元素 — O(1) amortized"
+    (when (null? (queue-record-out q))
+      (if (null? (queue-record-in q))
           (error 'queue-dequeue! "Queue is empty")
-          (let ([item (car items)])
-            (queue-record-items-set! q (cdr items))
-            item))))
+          (begin
+            (queue-record-out-set! q (reverse (queue-record-in q)))
+            (queue-record-in-set! q '()))))
+    (let ([item (car (queue-record-out q))])
+      (queue-record-out-set! q (cdr (queue-record-out q)))
+      item))
 
   (define (queue-empty? q)
     "检查队列是否为空"
-    (null? (queue-record-items q)))
+    (and (null? (queue-record-out q))
+         (null? (queue-record-in q))))
 
   (define (queue-not-empty? q)
     "检查队列是否非空"
@@ -78,7 +88,8 @@
 
   (define (queue-size q)
     "获取队列大小"
-    (length (queue-record-items q)))
+    (+ (length (queue-record-out q))
+       (length (queue-record-in q))))
 
   ;; ========================================
   ;; 调度器状态
@@ -203,6 +214,7 @@
             ;; 1. 保存 continuation
             (coroutine-continuation-set! coro k)
             (coroutine-state-set! coro 'suspended)
+            (coroutine-awaiting-promise-set! coro promise)
 
             ;; 2. 注册到 pending 表
             (hashtable-set! (scheduler-state-pending sched) promise coro)
@@ -240,25 +252,15 @@
      value-or-error: Promise 的结果或错误
      is-error?: 是否为错误"
 
-    ;; 1. 从 pending 表中移除
-    (let ([pending (scheduler-state-pending sched)])
-      (let-values ([(keys vals) (hashtable-entries pending)])
-        (vector-for-each
-          (lambda (i)
-            (when (eq? (vector-ref vals i) coro)
-              (hashtable-delete! pending (vector-ref keys i))))
-          (list->vector (iota (vector-length keys))))))
+    ;; 1. 从 pending 表中移除（O(1)：用 coroutine 上缓存的 promise 直接删除）
+    (let ([promise (coroutine-awaiting-promise coro)])
+      (when promise
+        (hashtable-delete! (scheduler-state-pending sched) promise)
+        (coroutine-awaiting-promise-set! coro #f)))
 
-    ;; 2. 设置结果
-    (if is-error?
-        (begin
-          ;; 如果是错误，标记为失败（但不立即抛出，让协程处理）
-          (coroutine-state-set! coro 'running)
-          (coroutine-result-set! coro value-or-error))
-        (begin
-          ;; 如果是成功值
-          (coroutine-state-set! coro 'running)
-          (coroutine-result-set! coro value-or-error)))
+    ;; 2. 设置结果（错误通过 value-or-error 的结构标记，见 run-coroutine!）
+    (coroutine-state-set! coro 'running)
+    (coroutine-result-set! coro value-or-error)
 
     ;; 3. 加入可运行队列
     (queue-enqueue! (scheduler-state-runnable sched) coro))
@@ -341,7 +343,7 @@
           ;; 情况 2: 有等待中的协程，运行事件循环
           [(> (hashtable-size (scheduler-state-pending sched)) 0)
            ;; 运行一次 libuv 事件循环
-           (uv-run loop 'once)
+           (%ffi-uv-run (uv-loop-ptr loop) (uv-run-mode->int 'once))
            (scheduler-loop)]
 
           ;; 情况 3: 所有协程完成

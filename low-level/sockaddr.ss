@@ -39,7 +39,8 @@
   (import (chezscheme)
           (chez-async ffi types)
           (chez-async ffi errors)
-          (chez-async internal macros))
+          (chez-async internal macros)
+          (only (chez-async internal foreign-utils) c-string->string))
 
   ;; ========================================
   ;; FFI 绑定：地址转换
@@ -105,14 +106,6 @@
             (let ([str (c-string->string buf)])
               (foreign-free buf)
               str)))))
-
-  (define (c-string->string ptr)
-    "将 C 字符串指针转换为 Scheme 字符串"
-    (let loop ([i 0] [chars '()])
-      (let ([byte (foreign-ref 'unsigned-8 ptr i)])
-        (if (= byte 0)
-            (list->string (reverse chars))
-            (loop (+ i 1) (cons (integer->char byte) chars))))))
 
   ;; ========================================
   ;; IPv6 地址处理

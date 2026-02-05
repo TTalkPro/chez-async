@@ -52,9 +52,10 @@
           (chez-async low-level handle-base)
           (chez-async low-level request-base)
           (chez-async low-level stream)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
-          (chez-async internal callback-registry))
+          (chez-async internal callback-registry)
+          (only (chez-async internal foreign-utils) c-string->string))
 
   ;; ========================================
   ;; 全局 Connect 回调（复用 TCP 的）
@@ -197,14 +198,6 @@
           (foreign-free buf-ptr)
           (foreign-free size-ptr)
           result))))
-
-  ;; 辅助函数：C 字符串转 Scheme 字符串
-  (define (c-string->string ptr)
-    (let loop ([i 0] [chars '()])
-      (let ([byte (foreign-ref 'unsigned-8 ptr i)])
-        (if (= byte 0)
-            (list->string (reverse chars))
-            (loop (+ i 1) (cons (integer->char byte) chars))))))
 
   ;; ========================================
   ;; Pipe 配置

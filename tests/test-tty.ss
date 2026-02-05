@@ -65,8 +65,8 @@
     (test "tty-reset"
       (let* ([loop (uv-loop-init)]
              [tty (uv-tty-init-stdout loop)])
-        ;; 重置 TTY 状态
-        (uv-tty-reset! tty)
+        ;; 重置所有终端为原始模式
+        (uv-tty-reset-mode!)
         ;; 清理
         (uv-handle-close! tty)
         (uv-run loop 'default)
@@ -80,10 +80,10 @@
                         (uv-tty-init loop 0))])  ; stdin
         ;; 非终端中初始化会失败，这是预期的
         (printf "Note: TTY init on non-terminal: ~a~n"
-                (if (condition? result) "failed (expected)" "succeeded")))
-      ;; 清理
-      (uv-run loop 'once)
-      (uv-loop-close loop)))
+                (if (condition? result) "failed (expected)" "succeeded"))
+        ;; 清理
+        (uv-run loop 'default)
+        (uv-loop-close loop))))
 
   ) ; end test-group
 

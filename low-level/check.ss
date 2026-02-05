@@ -29,7 +29,7 @@
           (chez-async ffi check)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal utils))
@@ -54,26 +54,9 @@
   ;; Check 句柄操作
   ;; ========================================
 
-  (define (uv-check-init loop)
-    "初始化 Check 句柄
-
-     参数：
-       loop - 事件循环对象
-
-     返回：
-       新创建的 Check 句柄包装器
-
-     说明：
-       Check 句柄初始化后处于停止状态。
-       使用完毕后必须调用 uv-handle-close! 释放资源。"
-    (let* ([size (%ffi-uv-check-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (let ([result (%ffi-uv-check-init loop-ptr ptr)])
-        (when (< result 0)
-          (foreign-free ptr)
-          (raise-uv-error 'uv-check-init result))
-        (make-handle ptr 'check loop))))
+  (define-handle-init uv-check-init check
+    %ffi-uv-check-size %ffi-uv-check-init
+    uv-loop-ptr allocate-handle make-handle)
 
   (define (uv-check-start! check callback)
     "启动 Check 句柄
@@ -97,18 +80,7 @@
       (%ffi-uv-check-start (handle-ptr check)
                            (get-check-callback))))
 
-  (define (uv-check-stop! check)
-    "停止 Check 句柄
-
-     参数：
-       check - Check 句柄包装器
-
-     说明：
-       停止后回调将不再被调用。
-       可以通过 uv-check-start! 重新启动。"
-    (when (handle-closed? check)
-      (error 'uv-check-stop! "check handle is closed"))
-    (with-uv-check uv-check-stop
-      (%ffi-uv-check-stop (handle-ptr check))))
+  (define-handle-stop! uv-check-stop! %ffi-uv-check-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
 ) ; end library

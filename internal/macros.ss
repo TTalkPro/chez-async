@@ -335,12 +335,7 @@
          (when (handle-closed?-fn handle)
            (error 'stop!-name "handle is closed"))
          (with-uv-check stop!-name
-           (ffi-stop-fn (handle-ptr-fn handle)))
-         ;; 清理回调
-         (let ([old-callback (handle-data-fn handle)])
-           (when old-callback
-             (unlock-object old-callback)
-             (handle-data-set-fn handle #f))))]))
+           (ffi-stop-fn (handle-ptr-fn handle))))]))
 
   ;; call-user-callback-with-error: 错误回调辅助宏
   ;;

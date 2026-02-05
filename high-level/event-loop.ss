@@ -11,7 +11,7 @@
 ;;; 2. 易于测试，可以创建独立的测试 loop
 ;;; 3. 符合 libuv 的 per-loop 架构
 ;;;
-;;; 注意：循环注册操作已提取到 internal/loop-registry.ss，
+;;; 注意：uv-loop 记录类型和循环注册操作已提取到 internal/loop-registry.ss，
 ;;; 以打破 low-level 模块对此模块的循环依赖。
 
 (library (chez-async high-level event-loop)
@@ -32,7 +32,9 @@
     uv-version
     uv-version-string
 
-    ;; 内部 API（低层使用）
+    ;; 内部 API（从 loop-registry 重新导出）
+    make-uv-loop
+    uv-loop?
     uv-loop-ptr
 
     ;; Per-loop 注册表操作（从 loop-registry 重新导出）
@@ -43,7 +45,7 @@
     ;; Loop 查找（从 loop-registry 重新导出）
     get-loop-by-ptr
 
-    ;; Threadpool 管理（per-loop）
+    ;; Threadpool 管理（从 loop-registry 重新导出）
     uv-loop-threadpool
     uv-loop-threadpool-set!
 
@@ -58,34 +60,6 @@
           (chez-async internal macros)
           (chez-async internal utils)
           (chez-async internal loop-registry))
-
-  ;; ========================================
-  ;; 事件循环包装器
-  ;; ========================================
-  ;;
-  ;; uv-loop 记录类型包含：
-  ;; - ptr: libuv uv_loop_t 的 C 指针
-  ;; - ptr-registry: C 指针到 Scheme 包装器的哈希表
-  ;; - threadpool: 关联的线程池（可选）
-  ;; - temp-buffers: 临时缓冲区存储（用于 alloc 回调）
-  ;;
-  ;; 所有 per-loop 状态都存储在此记录中，避免全局变量
-
-  (define-record-type uv-loop
-    (fields
-      (immutable ptr)            ; uv_loop_t* C 指针
-      (immutable ptr-registry)   ; hashtable: C 指针 -> Scheme 包装器
-      (mutable threadpool)       ; 关联的线程池（懒初始化）
-      (immutable temp-buffers))  ; hashtable: handle-ptr -> temp buffer
-    (protocol
-      (lambda (new)
-        (lambda (ptr)
-          (lock-object ptr)
-          (new ptr
-               (make-eqv-hashtable)  ; ptr-registry
-               #f                     ; threadpool (initially none)
-               (make-eqv-hashtable)  ; temp-buffers
-               )))))
 
   ;; ========================================
   ;; 事件循环创建和销毁

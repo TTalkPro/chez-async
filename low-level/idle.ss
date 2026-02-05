@@ -32,7 +32,7 @@
           (chez-async ffi idle)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal utils))
@@ -57,26 +57,9 @@
   ;; Idle 句柄操作
   ;; ========================================
 
-  (define (uv-idle-init loop)
-    "初始化 Idle 句柄
-
-     参数：
-       loop - 事件循环对象
-
-     返回：
-       新创建的 Idle 句柄包装器
-
-     说明：
-       Idle 句柄初始化后处于停止状态。
-       使用完毕后必须调用 uv-handle-close! 释放资源。"
-    (let* ([size (%ffi-uv-idle-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (let ([result (%ffi-uv-idle-init loop-ptr ptr)])
-        (when (< result 0)
-          (foreign-free ptr)
-          (raise-uv-error 'uv-idle-init result))
-        (make-handle ptr 'idle loop))))
+  (define-handle-init uv-idle-init idle
+    %ffi-uv-idle-size %ffi-uv-idle-init
+    uv-loop-ptr allocate-handle make-handle)
 
   (define (uv-idle-start! idle callback)
     "启动 Idle 句柄
@@ -104,18 +87,7 @@
       (%ffi-uv-idle-start (handle-ptr idle)
                           (get-idle-callback))))
 
-  (define (uv-idle-stop! idle)
-    "停止 Idle 句柄
-
-     参数：
-       idle - Idle 句柄包装器
-
-     说明：
-       停止后回调将不再被调用。
-       可以通过 uv-idle-start! 重新启动。"
-    (when (handle-closed? idle)
-      (error 'uv-idle-stop! "idle handle is closed"))
-    (with-uv-check uv-idle-stop
-      (%ffi-uv-idle-stop (handle-ptr idle))))
+  (define-handle-stop! uv-idle-stop! %ffi-uv-idle-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
 ) ; end library

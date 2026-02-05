@@ -1,8 +1,8 @@
-# Timer API Reference
+# Timer API 参考
 
-Timers allow you to schedule callbacks to run after a delay or repeatedly at intervals.
+定时器允许你在延迟后执行回调，或按固定间隔重复执行。
 
-## Quick Example
+## 快速示例
 
 ```scheme
 (import (chezscheme) (chez-async))
@@ -10,7 +10,7 @@ Timers allow you to schedule callbacks to run after a delay or repeatedly at int
 (define loop (uv-loop-init))
 (define timer (uv-timer-init loop))
 
-;; Fire after 1 second
+;; 1 秒后触发
 (uv-timer-start! timer 1000 0
   (lambda (t)
     (printf "Timer fired!~n")
@@ -20,7 +20,7 @@ Timers allow you to schedule callbacks to run after a delay or repeatedly at int
 (uv-loop-close loop)
 ```
 
-## Timer Functions
+## 定时器函数
 
 ### `uv-timer-init`
 
@@ -28,19 +28,19 @@ Timers allow you to schedule callbacks to run after a delay or repeatedly at int
 (uv-timer-init loop) → timer
 ```
 
-Create a new timer handle.
+创建新的定时器句柄。
 
-**Parameters:**
-- `loop` - Event loop
+**参数：**
+- `loop` - 事件循环
 
-**Returns:** Timer handle
+**返回：** 定时器句柄
 
-**Example:**
+**示例：**
 ```scheme
 (define loop (uv-loop-init))
 (define timer (uv-timer-init loop))
 
-;; Inspect using simplified API
+;; 使用简化 API 查看
 (printf "Type: ~a~n" (handle-type timer))    ; timer
 (printf "Closed?: ~a~n" (handle-closed? timer))  ; #f
 ```
@@ -53,38 +53,38 @@ Create a new timer handle.
 (uv-timer-start! timer timeout repeat callback) → void
 ```
 
-Start the timer.
+启动定时器。
 
-**Parameters:**
-- `timer` - Timer handle
-- `timeout` - Delay before first callback (milliseconds)
-- `repeat` - Repeat interval (milliseconds, 0 for one-shot)
-- `callback` - Function called when timer fires: `(lambda (timer) ...)`
+**参数：**
+- `timer` - 定时器句柄
+- `timeout` - 首次回调前的延迟（毫秒）
+- `repeat` - 重复间隔（毫秒，0 表示一次性）
+- `callback` - 定时器触发时调用的函数：`(lambda (timer) ...)`
 
-**Examples:**
+**示例：**
 
 ```scheme
-;; One-shot timer (fires once after 1 second)
+;; 一次性定时器（1 秒后触发一次）
 (uv-timer-start! timer 1000 0
   (lambda (t)
     (printf "Fired!~n")
     (uv-handle-close! t)))
 
-;; Repeating timer (fires every 500ms)
+;; 重复定时器（每 500ms 触发一次）
 (uv-timer-start! timer 500 500
   (lambda (t)
     (printf "Tick~n")))
 
-;; Start immediately, then repeat
+;; 立即触发，然后每秒重复
 (uv-timer-start! timer 0 1000
   (lambda (t)
     (printf "Immediate, then every 1s~n")))
 ```
 
-**With Custom Data:**
+**附带自定义数据：**
 
 ```scheme
-;; Store data with the timer
+;; 在定时器上存储数据
 (handle-data-set! timer '(count 0 name "my-timer"))
 
 (uv-timer-start! timer 1000 0
@@ -102,21 +102,21 @@ Start the timer.
 (uv-timer-stop! timer) → void
 ```
 
-Stop the timer. The handle remains valid and can be restarted.
+停止定时器。句柄仍然有效，可以重新启动。
 
-**Example:**
+**示例：**
 ```scheme
-;; Start timer
+;; 启动定时器
 (uv-timer-start! timer 1000 1000 callback)
 
-;; Stop it
+;; 停止
 (uv-timer-stop! timer)
 
-;; Start again with different parameters
+;; 使用不同参数重新启动
 (uv-timer-start! timer 500 500 callback)
 ```
 
-**Note:** Stopping a timer that hasn't started is a no-op.
+**注意：** 对尚未启动的定时器调用 stop 是无操作的。
 
 ---
 
@@ -126,25 +126,25 @@ Stop the timer. The handle remains valid and can be restarted.
 (uv-timer-again! timer) → void
 ```
 
-Restart a timer using the last `timeout` and `repeat` values.
+使用上次的 `timeout` 和 `repeat` 值重新启动定时器。
 
-**Requirements:**
-- Must have called `uv-timer-start!` previously, OR
-- Must have set repeat via `uv-timer-set-repeat!`
+**前提条件：**
+- 必须之前调用过 `uv-timer-start!`，或
+- 必须通过 `uv-timer-set-repeat!` 设置过重复间隔
 
-**Example:**
+**示例：**
 ```scheme
-;; Initial start
+;; 初始启动
 (uv-timer-start! timer 1000 500 callback)
 
-;; Stop it
+;; 停止
 (uv-timer-stop! timer)
 
-;; Restart with same values (1000ms delay, 500ms repeat)
+;; 使用相同参数重启（1000ms 延迟，500ms 重复）
 (uv-timer-again! timer)
 ```
 
-**Dynamic Interval Adjustment:**
+**动态调整间隔：**
 ```scheme
 (define ticks 0)
 (uv-timer-start! timer 0 200
@@ -152,7 +152,7 @@ Restart a timer using the last `timeout` and `repeat` values.
     (set! ticks (+ ticks 1))
     (printf "Tick ~a~n" ticks)
     (when (= ticks 5)
-      ;; Change to slower interval
+      ;; 切换到较慢的间隔
       (uv-timer-set-repeat! t 500)
       (uv-timer-again! t))))
 ```
@@ -165,18 +165,18 @@ Restart a timer using the last `timeout` and `repeat` values.
 (uv-timer-set-repeat! timer repeat) → void
 ```
 
-Set the repeat interval in milliseconds.
+设置重复间隔（毫秒）。
 
-**Parameters:**
-- `timer` - Timer handle
-- `repeat` - Repeat interval in milliseconds
+**参数：**
+- `timer` - 定时器句柄
+- `repeat` - 重复间隔（毫秒）
 
-**Note:** Changes take effect on next `uv-timer-start!` or `uv-timer-again!`.
+**注意：** 更改在下次 `uv-timer-start!` 或 `uv-timer-again!` 时生效。
 
-**Example:**
+**示例：**
 ```scheme
-(uv-timer-set-repeat! timer 1000)  ; 1 second
-(uv-timer-again! timer)  ; Use new interval
+(uv-timer-set-repeat! timer 1000)  ; 1 秒
+(uv-timer-again! timer)  ; 使用新间隔
 ```
 
 ---
@@ -187,11 +187,11 @@ Set the repeat interval in milliseconds.
 (uv-timer-get-repeat timer) → uint64
 ```
 
-Get the current repeat interval.
+获取当前重复间隔。
 
-**Returns:** Repeat interval in milliseconds
+**返回：** 重复间隔（毫秒）
 
-**Example:**
+**示例：**
 ```scheme
 (define interval (uv-timer-get-repeat timer))
 (printf "Current repeat: ~ams~n" interval)
@@ -205,11 +205,11 @@ Get the current repeat interval.
 (uv-timer-get-due-in timer) → uint64
 ```
 
-Get the time remaining until the timer fires.
+获取距离定时器触发的剩余时间。
 
-**Returns:** Milliseconds until timer fires (0 if not started or already fired)
+**返回：** 距触发的毫秒数（未启动或已触发则为 0）
 
-**Example:**
+**示例：**
 ```scheme
 (uv-timer-start! timer 5000 0 callback)
 (printf "Timer fires in: ~ams~n" (uv-timer-get-due-in timer))
@@ -217,44 +217,44 @@ Get the time remaining until the timer fires.
 
 ---
 
-## Handle API
+## 句柄 API
 
-Timers are handles and support all generic handle operations:
+定时器是句柄，支持所有通用句柄操作：
 
-### Handle Accessors (Simplified API)
+### 句柄访问器（简化 API）
 
 ```scheme
 (handle? timer)            ; #t
 (handle-type timer)        ; 'timer
-(handle-closed? timer)     ; #f (if not closed)
-(handle-ptr timer)         ; C pointer
-(handle-data timer)        ; Associated data
-(handle-data-set! timer data)  ; Store data
+(handle-closed? timer)     ; #f（未关闭时）
+(handle-ptr timer)         ; C 指针
+(handle-data timer)        ; 关联数据
+(handle-data-set! timer data)  ; 存储数据
 ```
 
-### Handle Operations
+### 句柄操作
 
 ```scheme
-;; Close the timer
+;; 关闭定时器
 (uv-handle-close! timer [callback])
 
-;; Reference counting (affects loop termination)
-(uv-handle-ref! timer)     ; Keep loop alive
-(uv-handle-unref! timer)   ; Allow loop to exit
-(uv-handle-has-ref? timer) ; Check ref status
+;; 引用计数（影响事件循环退出）
+(uv-handle-ref! timer)     ; 保持事件循环活跃
+(uv-handle-unref! timer)   ; 允许事件循环退出
+(uv-handle-has-ref? timer) ; 查看引用状态
 
-;; State queries
-(uv-handle-active? timer)  ; Is timer running?
-(uv-handle-closing? timer) ; Is close pending?
+;; 状态查询
+(uv-handle-active? timer)  ; 定时器是否运行中？
+(uv-handle-closing? timer) ; 是否正在关闭？
 ```
 
 ---
 
-## Common Patterns
+## 常见模式
 
-### One-Shot Timer
+### 一次性定时器
 
-Execute code after a delay:
+延迟后执行代码：
 
 ```scheme
 (define timer (uv-timer-init loop))
@@ -264,20 +264,20 @@ Execute code after a delay:
     (uv-handle-close! t)))
 ```
 
-### Repeating Timer
+### 重复定时器
 
-Execute code at regular intervals:
+按固定间隔执行代码：
 
 ```scheme
 (define timer (uv-timer-init loop))
-(uv-timer-start! timer 0 1000  ; Fire immediately, repeat every 1s
+(uv-timer-start! timer 0 1000  ; 立即触发，每秒重复
   (lambda (t)
     (printf "Every second~n")))
 ```
 
-### Countdown
+### 倒计时
 
-Count down from a value:
+从指定值倒数：
 
 ```scheme
 (define count 10)
@@ -293,9 +293,9 @@ Count down from a value:
       (uv-handle-close! t))))
 ```
 
-### Timeout with Cancellation
+### 可取消的超时
 
-Set a timeout that can be cancelled:
+设置可取消的超时：
 
 ```scheme
 (define timer (uv-timer-init loop))
@@ -305,15 +305,15 @@ Set a timeout that can be cancelled:
     (printf "Timeout!~n")
     (uv-handle-close! t)))
 
-;; Cancel if some condition is met
+;; 满足条件时取消
 (when some-condition?
   (uv-timer-stop! timer)
   (uv-handle-close! timer))
 ```
 
-### Rate Limiter
+### 频率限制器
 
-Limit operation frequency:
+限制操作频率：
 
 ```scheme
 (define timer (uv-timer-init loop))
@@ -322,16 +322,16 @@ Limit operation frequency:
 (define (rate-limited-op data)
   (set! pending-op data))
 
-(uv-timer-start! timer 0 100  ; Max 10 ops/second
+(uv-timer-start! timer 0 100  ; 最多每秒 10 次操作
   (lambda (t)
     (when pending-op
       (process-operation pending-op)
       (set! pending-op #f))))
 ```
 
-### Delayed Retry
+### 延迟重试
 
-Retry failed operations with backoff:
+带退避的失败重试：
 
 ```scheme
 (define (retry-with-backoff operation max-retries delay)
@@ -354,9 +354,9 @@ Retry failed operations with backoff:
     (try-operation)))
 ```
 
-### Debounce
+### 防抖
 
-Execute only after activity stops:
+活动停止后才执行：
 
 ```scheme
 (define debounce-timer (uv-timer-init loop))
@@ -372,9 +372,9 @@ Execute only after activity stops:
         (set! pending-action #f)))))
 ```
 
-### Throttle
+### 节流
 
-Execute at most once per interval:
+每个间隔内最多执行一次：
 
 ```scheme
 (define throttle-timer (uv-timer-init loop))
@@ -391,27 +391,27 @@ Execute at most once per interval:
 
 ---
 
-## Best Practices
+## 最佳实践
 
-### 1. Always Close Timers
+### 1. 始终关闭定时器
 
 ```scheme
-;; Good - close when done
+;; 正确 - 完成后关闭
 (uv-timer-start! timer 1000 0
   (lambda (t)
     (do-work)
     (uv-handle-close! t)))
 
-;; Bad - forgot to close
+;; 错误 - 忘记关闭
 (uv-timer-start! timer 1000 0
   (lambda (t)
-    (do-work)))  ; Memory leak!
+    (do-work)))  ; 内存泄漏！
 ```
 
-### 2. Store State with handle-data
+### 2. 使用 handle-data 存储状态
 
 ```scheme
-;; Good - use handle-data for timer state
+;; 正确 - 使用 handle-data 存储定时器状态
 (handle-data-set! timer '(count 0 max 10))
 
 (uv-timer-start! timer 0 1000
@@ -424,7 +424,7 @@ Execute at most once per interval:
         (uv-handle-close! t)))))
 ```
 
-### 3. Handle Errors in Callbacks
+### 3. 处理回调中的错误
 
 ```scheme
 (uv-timer-start! timer 1000 0
@@ -436,7 +436,7 @@ Execute at most once per interval:
       (risky-operation))))
 ```
 
-### 4. Clean Up on Loop Exit
+### 4. 退出时清理
 
 ```scheme
 (define timer (uv-timer-init loop))
@@ -453,20 +453,20 @@ Execute at most once per interval:
 
 ---
 
-## Notes
+## 注意事项
 
-- **Precision**: Timers are accurate to ~1ms, depending on system timer resolution
-- **Thread Safety**: Timer functions must be called from the main thread
-- **Closing**: Always close timers when done to free resources
-- **Reusability**: Stopped timers can be restarted with new parameters
-- **Callbacks**: Receive the timer handle as first argument
-- **Data Storage**: Use `handle-data` to associate custom data with timers
+- **精度**：定时器精度约 ~1ms，取决于系统定时器分辨率
+- **线程安全**：定时器函数必须在主线程中调用
+- **关闭**：完成后始终关闭定时器以释放资源
+- **可重用**：已停止的定时器可以使用新参数重新启动
+- **回调**：回调函数的第一个参数是定时器句柄
+- **数据存储**：使用 `handle-data` 将自定义数据与定时器关联
 
 ---
 
-## See Also
+## 参见
 
-- [Getting Started Guide](../guide/getting-started.md)
-- [Handle API](#handle-api)
-- [Async Work Guide](../guide/async-work.md)
-- [Examples](../../examples/timer-demo.ss)
+- [快速入门指南](../guide/getting-started.md)
+- [句柄 API](#句柄-api)
+- [异步任务指南](../guide/async-work.md)
+- [示例代码](../../examples/timer-demo.ss)

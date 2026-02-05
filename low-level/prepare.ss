@@ -29,7 +29,7 @@
           (chez-async ffi prepare)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal utils))
@@ -54,26 +54,9 @@
   ;; Prepare 句柄操作
   ;; ========================================
 
-  (define (uv-prepare-init loop)
-    "初始化 Prepare 句柄
-
-     参数：
-       loop - 事件循环对象
-
-     返回：
-       新创建的 Prepare 句柄包装器
-
-     说明：
-       Prepare 句柄初始化后处于停止状态。
-       使用完毕后必须调用 uv-handle-close! 释放资源。"
-    (let* ([size (%ffi-uv-prepare-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (let ([result (%ffi-uv-prepare-init loop-ptr ptr)])
-        (when (< result 0)
-          (foreign-free ptr)
-          (raise-uv-error 'uv-prepare-init result))
-        (make-handle ptr 'prepare loop))))
+  (define-handle-init uv-prepare-init prepare
+    %ffi-uv-prepare-size %ffi-uv-prepare-init
+    uv-loop-ptr allocate-handle make-handle)
 
   (define (uv-prepare-start! prepare callback)
     "启动 Prepare 句柄
@@ -97,18 +80,7 @@
       (%ffi-uv-prepare-start (handle-ptr prepare)
                              (get-prepare-callback))))
 
-  (define (uv-prepare-stop! prepare)
-    "停止 Prepare 句柄
-
-     参数：
-       prepare - Prepare 句柄包装器
-
-     说明：
-       停止后回调将不再被调用。
-       可以通过 uv-prepare-start! 重新启动。"
-    (when (handle-closed? prepare)
-      (error 'uv-prepare-stop! "prepare handle is closed"))
-    (with-uv-check uv-prepare-stop
-      (%ffi-uv-prepare-stop (handle-ptr prepare))))
+  (define-handle-stop! uv-prepare-stop! %ffi-uv-prepare-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
 ) ; end library
