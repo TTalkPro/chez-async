@@ -251,16 +251,9 @@
               (hashtable-delete! pending (vector-ref keys i))))
           (list->vector (iota (vector-length keys))))))
 
-    ;; 2. 设置结果
-    (if is-error?
-        (begin
-          ;; 如果是错误，标记为失败（但不立即抛出，让协程处理）
-          (coroutine-state-set! coro 'running)
-          (coroutine-result-set! coro value-or-error))
-        (begin
-          ;; 如果是成功值
-          (coroutine-state-set! coro 'running)
-          (coroutine-result-set! coro value-or-error)))
+    ;; 2. 设置结果（错误通过 value-or-error 的结构标记，见 run-coroutine!）
+    (coroutine-state-set! coro 'running)
+    (coroutine-result-set! coro value-or-error)
 
     ;; 3. 加入可运行队列
     (queue-enqueue! (scheduler-state-runnable sched) coro))
