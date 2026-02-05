@@ -398,6 +398,105 @@ I/O 操作       → Pending Table  → 等待事件 → Runnable Queue
 继续执行其他协程
 ```
 
+### 4. 两层 Call/CC 的完整协作机制
+
+`scheduler-k` 是整个协程调度的核心——它让协程在 `await` 时能够**让出控制权**回到调度器主循环。整个机制依赖两层 `call/cc` 的配合。
+
+#### 第一层：调度器 continuation（scheduler-k）
+
+每次调度循环迭代开始时，`run-scheduler` 用 `call/cc` 捕获当前位置：
+
+```scheme
+;; internal/scheduler.ss:322-326
+(call/cc
+  (lambda (k)
+    (scheduler-state-scheduler-k-set! sched k)))
+```
+
+此时 `scheduler-k` 代表的含义是："回到调度循环的顶部，重新检查 runnable/pending 状态"。
+
+#### 第二层：协程 continuation（coroutine-continuation）
+
+当协程执行到 `await` 时，`suspend-for-promise!` 用 `call/cc` 捕获协程当前执行位置：
+
+```scheme
+;; internal/scheduler.ss:201-229
+(call/cc
+  (lambda (k)
+    ;; 1. 保存协程 continuation（"从 await 处继续"）
+    (coroutine-continuation-set! coro k)
+    (coroutine-state-set! coro 'suspended)
+
+    ;; 2. 注册到 pending 表
+    (hashtable-set! pending promise coro)
+
+    ;; 3. 注册 Promise 回调（Promise 完成时恢复协程）
+    (promise-then promise
+      (lambda (value)
+        (resume-coroutine! sched coro value #f))
+      (lambda (error)
+        (resume-coroutine! sched coro (cons 'promise-error error) #t)))
+
+    ;; 4. 用 scheduler-k 跳回调度器
+    (let ([scheduler-k (scheduler-state-scheduler-k sched)])
+      (scheduler-k (void)))))
+```
+
+#### 两层 continuation 的交互流程
+
+```
+run-scheduler
+  │
+  ├─ call/cc ──→ 保存 scheduler-k（"回到调度循环顶部"）
+  │
+  ├─ 取出协程 → run-coroutine!
+  │     │
+  │     └─ 协程执行用户代码
+  │           │
+  │           └─ (await promise) → suspend-for-promise!
+  │                 │
+  │                 ├─ call/cc ──→ 保存 coroutine-k（"从 await 处继续"）
+  │                 ├─ 注册 Promise 回调
+  │                 └─ (scheduler-k (void)) ──→ 跳回调度循环顶部
+  │                                               │
+  ├─ 调度循环继续 ←─────────────────────────────────┘
+  │
+  ├─ 没有可运行协程？→ (uv-run loop 'once) 等待 I/O 事件
+  │     │
+  │     └─ Timer/IO 事件触发 → Promise 完成
+  │           │
+  │           └─ resume-coroutine! → 协程放回 runnable 队列
+  │
+  ├─ 取出协程 → run-coroutine!
+  │     │
+  │     └─ (k result) ──→ 调用保存的 coroutine-k
+  │                        协程从 await 处恢复，result 作为返回值
+  │
+  └─ runnable 和 pending 都空 → 退出
+```
+
+#### 恢复时的值传递
+
+当 Promise 完成后，`run-coroutine!` 通过调用保存的 continuation 将结果传回：
+
+```scheme
+;; internal/scheduler.ss:294-304
+(if is-first-run?
+    (k)                    ; 首次运行：调用 thunk
+    (let ([result (coroutine-result coro)])
+      (if (and (pair? result) (eq? (car result) 'promise-error))
+          (raise (cdr result))   ; Promise 拒绝：在协程内抛出异常
+          (k result))))          ; Promise 完成：result 成为 await 的返回值
+```
+
+这就是 `(await promise)` 能够"返回" Promise 结果值的原因——`call/cc` 捕获的 continuation `k` 被调用时，传入的 `result` 就成为了 `call/cc` 表达式的返回值。
+
+#### 关键不变量
+
+- **scheduler-k 在每次调度循环迭代时更新**：确保协程总是跳回最新的调度点
+- **coroutine-continuation 在挂起时设置，恢复后清除**：`run-coroutine!` 执行前先置 `#f`（第291行），防止重复执行
+- **如果 scheduler-k 为 `#f`，说明不在调度器上下文中**：此时调用 `await` 会报错
+
 ---
 
 ## 📝 代码关键位置
@@ -460,6 +559,44 @@ I/O 操作       → Pending Table  → 等待事件 → Runnable Queue
       ;; 情况 3: 所有完成
       [else (values)])))
 ```
+
+#### Named Let 语法说明
+
+`(let scheduler-loop () ...)` 是 Scheme 的 **named let**，不是普通的变量绑定。它等价于：
+
+```scheme
+(letrec ([scheduler-loop (lambda () body ...)])
+  (scheduler-loop))
+```
+
+即定义一个名为 `scheduler-loop` 的无参递归函数并立即调用。`()` 是空的绑定列表，表示没有循环变量。Chez Scheme 会将尾位置的递归调用优化为真正的循环（不会栈溢出）。
+
+#### run-scheduler 的退出条件
+
+`run-scheduler` 在 **runnable 队列为空 且 pending 表也为空** 时退出——即所有协程都已完成或失败，没有任何协程在等待 I/O。
+
+**典型的生命周期**：
+
+```
+spawn 2 个协程 → runnable: [C1, C2], pending: {}
+
+执行 C1 → C1 遇到 await → runnable: [C2], pending: {P1→C1}
+执行 C2 → C2 遇到 await → runnable: [],  pending: {P1→C1, P2→C2}
+
+runnable 空，pending 非空 → uv-run 'once（等 I/O）
+
+P2 完成 → runnable: [C2], pending: {P1→C1}
+执行 C2 → C2 完成        → runnable: [],  pending: {P1→C1}
+
+runnable 空，pending 非空 → uv-run 'once（等 I/O）
+
+P1 完成 → runnable: [C1], pending: {}
+执行 C1 → C1 完成        → runnable: [],  pending: {}
+
+两个都空 → (values) → 退出
+```
+
+**会卡住的情况**：如果某个 Promise 永远不完成（比如等待一个永远不来的网络包），`run-scheduler` 会一直卡在情况 2 的 `(uv-run loop 'once)` 里无限循环。这也是为什么需要 `async-timeout` 之类的机制来防止永久挂起。
 
 ---
 
@@ -526,6 +663,64 @@ Scheduler (调度器)
 - ✅ 支持多事件循环
 - ✅ 高效的协程调度
 - ✅ 自然的 async/await 语法
+
+---
+
+---
+
+## 🔒 lock-object 与 GC 保护
+
+### 为什么需要 lock-object
+
+Scheme 的 GC 只追踪 Scheme 侧的引用。当回调函数通过 FFI 传给 libuv（C 代码）后，GC 看不到 C 侧的引用，可能会回收仍在使用的对象，导致野指针崩溃。
+
+```
+Scheme 侧                    C 侧 (libuv)
+
+callback ─────FFI传递─────→ uv_timer_t.callback
+    │                              │
+    │ Scheme 不再引用               │ libuv 还在用
+    │ GC 认为可以回收 ❌            │ 定时器到期要调它
+    ↓                              ↓
+  被 GC 回收                   野指针 → 崩溃
+```
+
+`lock-object` 告诉 GC："这个对象有外部引用，别回收"。
+
+### 必须配对 unlock-object
+
+否则内存泄漏——对象永远不会被回收。项目中的生命周期：
+
+```
+lock-object callback       ← start! 时锁住
+  │
+  │  libuv 持有引用，GC 不会回收
+  │
+unlock-object callback     ← close! 或下次 start! 时释放
+  │
+  │  GC 可以回收了
+  ↓
+```
+
+### 在句柄操作中的模式
+
+```scheme
+;; start! 时：释放旧回调，锁住新回调
+(define (uv-timer-start! timer timeout repeat callback)
+  (let ([old-callback (handle-data timer)])
+    (when old-callback
+      (unlock-object old-callback)))     ; 释放旧的
+  (handle-data-set! timer callback)
+  (lock-object callback)                 ; 锁住新的
+  (%ffi-uv-timer-start ...))
+
+;; stop! 时：只停止，不动回调（回调保留以支持 again! 重启）
+;; close! 时：cleanup-handle-wrapper! 统一 unlock 回调
+```
+
+### 相关 bug 修复
+
+2026-02-05 修复了 timer/signal/poll 的 stop! 函数错误清除回调的问题。stop! 会 unlock 并清除回调，导致 again!/重新 start! 时回调为 `#f`，事件循环挂起。修复方式：stop! 只停止操作不动回调，close! 时统一清理。
 
 ---
 

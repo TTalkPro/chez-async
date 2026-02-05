@@ -1,20 +1,24 @@
-;;; internal/buffer-utils.ss - Unified buffer utilities
+;;; internal/buffer-utils.ss - 统一缓冲区工具
 ;;;
-;;; Consolidates buffer handling operations used across stream, UDP, DNS, etc.
-;;; Provides consistent interface for foreign pointer ↔ bytevector conversions
+;;; 本模块提供：
+;;; - 外部指针与 bytevector 之间的转换
+;;; - uv_buf_t 结构的创建与访问
+;;; - 缓冲区管理宏（自动分配/释放）
+;;;
+;;; 供 stream、UDP、DNS 等模块共用，确保缓冲区操作接口一致。
 
 (library (chez-async internal buffer-utils)
   (export
-    ;; Conversion utilities
+    ;; 转换工具
     foreign->bytevector
     bytevector->foreign
 
-    ;; uv_buf_t utilities
+    ;; uv_buf_t 工具
     make-uv-buf
     uv-buf-base
     uv-buf-len
 
-    ;; High-level macros
+    ;; 高层宏
     with-temp-buffer
     with-read-buffer
     with-write-buffers)
@@ -23,18 +27,20 @@
           (chez-async ffi types))
 
   ;; ========================================
-  ;; Foreign → Bytevector Conversion
+  ;; 外部指针 → Bytevector 转换
   ;; ========================================
 
   (define (foreign->bytevector ptr length)
-    "Copy foreign memory to Scheme bytevector
+    "将外部内存复制为 Scheme bytevector
 
-     ptr: foreign pointer to memory
-     length: number of bytes to copy
+     参数：
+       ptr    - 外部内存指针
+       length - 要复制的字节数
 
-     Returns: bytevector containing copied data
+     返回：
+       包含复制数据的 bytevector
 
-     Used for: read callbacks, DNS responses, UDP recv"
+     用途：读回调、DNS 响应、UDP 接收"
     (if (or (not ptr) (<= length 0))
         #vu8()  ; Empty bytevector for empty data
         (let ([bv (make-bytevector length)])
@@ -43,21 +49,23 @@
             (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i))))))
 
   ;; ========================================
-  ;; Bytevector → Foreign Conversion
+  ;; Bytevector → 外部指针转换
   ;; ========================================
 
   (define (bytevector->foreign bv)
-    "Allocate foreign memory and copy bytevector
+    "分配外部内存并复制 bytevector 内容
 
-     bv: Scheme bytevector
+     参数：
+       bv - Scheme bytevector
 
-     Returns: (values ptr length)
-       ptr: foreign pointer (caller must free)
-       length: number of bytes
+     返回：
+       (values ptr length)
+       ptr: 外部指针（调用者负责释放）
+       length: 字节数
 
-     Used for: write operations, UDP send
+     用途：写操作、UDP 发送
 
-     IMPORTANT: Caller is responsible for freeing returned pointer"
+     注意：调用者必须释放返回的指针"
     (let ([len (bytevector-length bv)])
       (if (= len 0)
           (values 0 0)  ; NULL pointer for empty data
@@ -68,16 +76,18 @@
             (values ptr len)))))
 
   ;; ========================================
-  ;; uv_buf_t Utilities
+  ;; uv_buf_t 工具函数
   ;; ========================================
 
   (define (make-uv-buf base len)
-    "Create uv_buf_t structure in foreign memory
+    "在外部内存中创建 uv_buf_t 结构
 
-     base: foreign pointer to buffer data
-     len: buffer length
+     参数：
+       base - 缓冲区数据的外部指针
+       len  - 缓冲区长度
 
-     Returns: foreign pointer to uv_buf_t (caller must free)"
+     返回：
+       指向 uv_buf_t 的外部指针（调用者负责释放）"
     (let* ([buf-size (foreign-sizeof 'uv-buf-t)]
            [buf-ptr (foreign-alloc buf-size)])
       (let ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)])
@@ -86,25 +96,29 @@
         buf-ptr)))
 
   (define (uv-buf-base buf-ptr)
-    "Extract base pointer from uv_buf_t
+    "从 uv_buf_t 提取数据指针
 
-     buf-ptr: foreign pointer to uv_buf_t
+     参数：
+       buf-ptr - 指向 uv_buf_t 的外部指针
 
-     Returns: foreign pointer to buffer data"
+     返回：
+       缓冲区数据的外部指针"
     (let ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)])
       (ftype-ref uv-buf-t (base) buf-fptr)))
 
   (define (uv-buf-len buf-ptr)
-    "Extract length from uv_buf_t
+    "从 uv_buf_t 提取长度
 
-     buf-ptr: foreign pointer to uv_buf_t
+     参数：
+       buf-ptr - 指向 uv_buf_t 的外部指针
 
-     Returns: buffer length (integer)"
+     返回：
+       缓冲区长度（整数）"
     (let ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)])
       (ftype-ref uv-buf-t (len) buf-fptr)))
 
   ;; ========================================
-  ;; High-Level Macros
+  ;; 高层宏
   ;; ========================================
 
   (define-syntax with-temp-buffer

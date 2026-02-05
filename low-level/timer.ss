@@ -37,7 +37,7 @@
           (chez-async ffi timer)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal handle-utils)
@@ -66,25 +66,9 @@
   ;; Timer 创建
   ;; ========================================
 
-  (define (uv-timer-init loop)
-    "初始化定时器句柄
-
-     参数：
-       loop - 事件循环对象
-
-     返回：
-       新创建的定时器句柄包装器
-
-     说明：
-       定时器初始化后处于停止状态，需调用 uv-timer-start! 启动。
-       使用完毕后必须调用 uv-handle-close! 释放资源。"
-    (let* ([size (%ffi-uv-timer-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (with-uv-check/cleanup uv-timer-init
-        (%ffi-uv-timer-init loop-ptr ptr)
-        (lambda () (foreign-free ptr)))
-      (make-handle ptr 'timer loop)))
+  (define-handle-init uv-timer-init timer
+    %ffi-uv-timer-size %ffi-uv-timer-init
+    uv-loop-ptr allocate-handle make-handle)
 
   ;; ========================================
   ;; Timer 操作
@@ -103,6 +87,10 @@
        如果定时器已启动，会先停止再重新启动。
        回调在事件循环线程中执行，避免长时间阻塞。"
     (with-handle-check timer uv-timer-start!
+      ;; 释放旧回调
+      (let ([old-callback (handle-data timer)])
+        (when old-callback
+          (unlock-object old-callback)))
       ;; 保存回调
       (handle-data-set! timer callback)
       (lock-object callback)
@@ -113,23 +101,8 @@
                              timeout
                              repeat))))
 
-  (define (uv-timer-stop! timer)
-    "停止定时器
-
-     参数：
-       timer - 定时器句柄
-
-     说明：
-       停止后可以通过 uv-timer-start! 或 uv-timer-again! 重新启动。
-       停止会清理之前注册的回调。"
-    (with-handle-check timer uv-timer-stop!
-      (with-uv-check uv-timer-stop
-        (%ffi-uv-timer-stop (handle-ptr timer)))
-      ;; 解锁之前的回调
-      (let ([old-callback (handle-data timer)])
-        (when old-callback
-          (unlock-object old-callback)
-          (handle-data-set! timer #f)))))
+  (define-handle-stop! uv-timer-stop! %ffi-uv-timer-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
   (define (uv-timer-again! timer)
     "重启定时器

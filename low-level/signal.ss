@@ -36,7 +36,7 @@
           (chez-async ffi signal)
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
           (chez-async internal handle-utils))
@@ -90,25 +90,9 @@
   ;; Signal 创建
   ;; ========================================
 
-  (define (uv-signal-init loop)
-    "初始化信号句柄
-
-     参数：
-       loop - 事件循环对象
-
-     返回：
-       新创建的信号句柄包装器
-
-     说明：
-       信号句柄初始化后处于停止状态。
-       使用完毕后必须调用 uv-handle-close! 释放资源。"
-    (let* ([size (%ffi-uv-signal-size)]
-           [ptr (allocate-handle size)]
-           [loop-ptr (uv-loop-ptr loop)])
-      (with-uv-check/cleanup uv-signal-init
-        (%ffi-uv-signal-init loop-ptr ptr)
-        (lambda () (foreign-free ptr)))
-      (make-handle ptr 'signal loop)))
+  (define-handle-init uv-signal-init signal
+    %ffi-uv-signal-size %ffi-uv-signal-init
+    uv-loop-ptr allocate-handle make-handle)
 
   ;; ========================================
   ;; Signal 控制
@@ -126,6 +110,10 @@
        每次收到信号时都会调用回调。
        要停止监听，调用 uv-signal-stop! 或 uv-handle-close!。"
     (with-handle-check signal uv-signal-start!
+      ;; 释放旧回调
+      (let ([old-callback (handle-data signal)])
+        (when old-callback
+          (unlock-object old-callback)))
       ;; 保存用户回调
       (handle-data-set! signal callback)
       (lock-object callback)
@@ -147,6 +135,10 @@
        信号触发一次后自动停止监听。
        适用于只需要处理一次的场景（如优雅关闭）。"
     (with-handle-check signal uv-signal-start-oneshot!
+      ;; 释放旧回调
+      (let ([old-callback (handle-data signal)])
+        (when old-callback
+          (unlock-object old-callback)))
       ;; 保存用户回调
       (handle-data-set! signal callback)
       (lock-object callback)
@@ -156,22 +148,7 @@
                                        (get-signal-callback)
                                        signum))))
 
-  (define (uv-signal-stop! signal)
-    "停止监听信号
-
-     参数：
-       signal - 信号句柄
-
-     说明：
-       停止后可以通过 uv-signal-start! 重新开始监听。
-       停止会清理之前注册的回调。"
-    (with-handle-check signal uv-signal-stop!
-      (with-uv-check uv-signal-stop
-        (%ffi-uv-signal-stop (handle-ptr signal)))
-      ;; 清理回调
-      (let ([callback (handle-data signal)])
-        (when callback
-          (unlock-object callback)
-          (handle-data-set! signal #f)))))
+  (define-handle-stop! uv-signal-stop! %ffi-uv-signal-stop
+    handle-ptr handle-data handle-data-set! handle-closed?)
 
 ) ; end library

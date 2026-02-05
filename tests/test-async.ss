@@ -55,7 +55,7 @@
       ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
       (let ([pool (uv-loop-threadpool loop)])
         (when pool (threadpool-shutdown! pool)))
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-fibonacci"
@@ -77,7 +77,7 @@
       ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
       (let ([pool (uv-loop-threadpool loop)])
         (when pool (threadpool-shutdown! pool)))
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-error-handling"
@@ -107,7 +107,7 @@
       ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
       (let ([pool (uv-loop-threadpool loop)])
         (when pool (threadpool-shutdown! pool)))
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "parallel-async-tasks"
@@ -137,7 +137,7 @@
       ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
       (let ([pool (uv-loop-threadpool loop)])
         (when pool (threadpool-shutdown! pool)))
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "threadpool-custom-size"
@@ -160,7 +160,7 @@
                     "should use custom threadpool")
       ;; 清理
       (threadpool-shutdown! pool)
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-with-data-passing"
@@ -182,7 +182,7 @@
       ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
       (let ([pool (uv-loop-threadpool loop)])
         (when pool (threadpool-shutdown! pool)))
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
   (test "async-work-success-handler"
@@ -206,7 +206,7 @@
       ;; 清理：先关闭线程池，再运行一次事件循环让 async handle 完全关闭，最后关闭 loop
       (let ([pool (uv-loop-threadpool loop)])
         (when pool (threadpool-shutdown! pool)))
-      (uv-run loop 'once)  ; 让 async handle 完全关闭
+      (uv-run loop 'default)  ; 让 async handle 完全关闭
       (uv-loop-close loop)))
 
 ) ; end test-group

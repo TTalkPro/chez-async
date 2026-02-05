@@ -135,7 +135,10 @@
         (lambda (s signum)
           (set! int-received? #t)
           (uv-signal-stop! s)
-          (uv-handle-close! s)))
+          (uv-handle-close! s)
+          ;; 关闭未触发的 SIGUSR2 处理器，避免事件循环挂起
+          (uv-signal-stop! sig-term)
+          (uv-handle-close! sig-term)))
       (uv-signal-start! sig-term SIGUSR2
         (lambda (s signum)
           (set! term-received? #t)

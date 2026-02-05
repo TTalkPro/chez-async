@@ -53,7 +53,7 @@
           (chez-async ffi tty)
           (chez-async low-level handle-base)
           (chez-async low-level stream)
-          (chez-async high-level event-loop)
+          (chez-async internal loop-registry)
           (chez-async internal macros))
 
   ;; ========================================

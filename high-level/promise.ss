@@ -21,6 +21,10 @@
 ;;; - pending: 初始状态，等待结果
 ;;; - fulfilled: 成功完成，有值
 ;;; - rejected: 失败，有错误
+;;;
+;;; 注意：Promise 核心实现（记录类型、promise-then、fulfill/reject）
+;;; 已提取到 internal/promise-core.ss，以打破 internal/scheduler.ss 的层级违规。
+;;; 本模块在加载时注入基于 uv-timer 的微任务调度器。
 
 (library (chez-async high-level promise)
   (export
@@ -30,7 +34,7 @@
     promise-resolved
     promise-rejected
 
-    ;; 链式操作
+    ;; 链式操作（从 promise-core 重新导出）
     promise-then
     promise-catch
     promise-finally
@@ -53,72 +57,14 @@
   (import (chezscheme)
           (chez-async high-level event-loop)
           (chez-async low-level timer)
-          (chez-async low-level handle-base))
+          (chez-async low-level handle-base)
+          (chez-async internal promise-core))
 
   ;; ========================================
-  ;; Promise 记录类型
-  ;; ========================================
-
-  (define-record-type promise-record
-    (fields
-      (mutable state)           ; 'pending | 'fulfilled | 'rejected
-      (mutable value)           ; 成功时的值
-      (mutable reason)          ; 失败时的原因
-      (mutable on-fulfilled)    ; 成功回调列表
-      (mutable on-rejected)     ; 失败回调列表
-      (mutable loop))           ; 关联的事件循环
-    (protocol
-      (lambda (new)
-        (lambda (loop)
-          (new 'pending #f #f '() '() loop)))))
-
   ;; 类型谓词别名
+  ;; ========================================
+
   (define promise? promise-record?)
-
-  ;; ========================================
-  ;; 内部辅助函数
-  ;; ========================================
-
-  (define (schedule-microtask loop thunk)
-    "在下一个事件循环迭代中执行 thunk"
-    ;; 使用 0ms 定时器模拟微任务
-    (let ([timer (uv-timer-init loop)])
-      (uv-timer-start! timer 0 0
-        (lambda (t)
-          (uv-handle-close! t)
-          (thunk)))))
-
-  (define (fulfill-promise! promise value)
-    "将 promise 标记为成功完成"
-    (when (eq? (promise-record-state promise) 'pending)
-      (promise-record-state-set! promise 'fulfilled)
-      (promise-record-value-set! promise value)
-      ;; 调度所有成功回调
-      (let ([loop (promise-record-loop promise)])
-        (for-each
-          (lambda (callback)
-            (schedule-microtask loop
-              (lambda () (callback value))))
-          (promise-record-on-fulfilled promise)))
-      ;; 清空回调列表
-      (promise-record-on-fulfilled-set! promise '())
-      (promise-record-on-rejected-set! promise '())))
-
-  (define (reject-promise! promise reason)
-    "将 promise 标记为失败"
-    (when (eq? (promise-record-state promise) 'pending)
-      (promise-record-state-set! promise 'rejected)
-      (promise-record-reason-set! promise reason)
-      ;; 调度所有失败回调
-      (let ([loop (promise-record-loop promise)])
-        (for-each
-          (lambda (callback)
-            (schedule-microtask loop
-              (lambda () (callback reason))))
-          (promise-record-on-rejected promise)))
-      ;; 清空回调列表
-      (promise-record-on-fulfilled-set! promise '())
-      (promise-record-on-rejected-set! promise '())))
 
   ;; ========================================
   ;; Promise 创建
@@ -135,7 +81,7 @@
         executor: (lambda (resolve reject) ...) 执行器函数"
        (let* ([promise (make-promise-record loop)]
               [resolve (lambda (value)
-                         (if (promise? value)
+                         (if (promise-record? value)
                              ;; 如果 resolve 的值是另一个 promise，等待它
                              (promise-then value
                                (lambda (v) (fulfill-promise! promise v))
@@ -195,61 +141,8 @@
     (eq? (promise-record-state promise) 'rejected))
 
   ;; ========================================
-  ;; 链式操作
+  ;; 额外链式操作
   ;; ========================================
-
-  (define promise-then
-    (case-lambda
-      [(promise on-fulfilled)
-       (promise-then promise on-fulfilled #f)]
-      [(promise on-fulfilled on-rejected)
-       "添加成功和/或失败回调，返回新的 Promise
-        promise: 源 Promise
-        on-fulfilled: 成功回调 (lambda (value) ...)
-        on-rejected: 失败回调 (lambda (reason) ...)"
-       (let* ([loop (promise-record-loop promise)]
-              [new-promise (make-promise-record loop)])
-         (letrec
-           ([handle-fulfilled
-              (lambda (value)
-                (if on-fulfilled
-                    (guard (e [else (reject-promise! new-promise e)])
-                      (let ([result (on-fulfilled value)])
-                        (if (promise? result)
-                            (promise-then result
-                              (lambda (v) (fulfill-promise! new-promise v))
-                              (lambda (r) (reject-promise! new-promise r)))
-                            (fulfill-promise! new-promise result))))
-                    (fulfill-promise! new-promise value)))]
-            [handle-rejected
-              (lambda (reason)
-                (if on-rejected
-                    (guard (e [else (reject-promise! new-promise e)])
-                      (let ([result (on-rejected reason)])
-                        (if (promise? result)
-                            (promise-then result
-                              (lambda (v) (fulfill-promise! new-promise v))
-                              (lambda (r) (reject-promise! new-promise r)))
-                            (fulfill-promise! new-promise result))))
-                    (reject-promise! new-promise reason)))])
-           (case (promise-record-state promise)
-             [(fulfilled)
-              (schedule-microtask loop
-                (lambda () (handle-fulfilled (promise-record-value promise))))]
-             [(rejected)
-              (schedule-microtask loop
-                (lambda () (handle-rejected (promise-record-reason promise))))]
-             [(pending)
-              (promise-record-on-fulfilled-set! promise
-                (cons handle-fulfilled (promise-record-on-fulfilled promise)))
-              (promise-record-on-rejected-set! promise
-                (cons handle-rejected (promise-record-on-rejected promise)))]))
-         new-promise)]))
-
-  (define (promise-catch promise on-rejected)
-    "添加失败回调
-     等同于 (promise-then promise #f on-rejected)"
-    (promise-then promise #f on-rejected))
 
   (define (promise-finally promise on-finally)
     "添加完成回调（无论成功或失败）
@@ -390,5 +283,21 @@
           (promise-record-value promise)
           (error 'promise-wait "Promise rejected"
                  (promise-record-reason promise)))))
+
+  ;; ========================================
+  ;; 注入微任务调度器
+  ;; ========================================
+  ;;
+  ;; 使用 uv-timer 的 0ms 定时器实现微任务调度。
+  ;; 这在库加载时执行，确保 promise-core 的
+  ;; schedule-microtask 使用真实的事件循环调度。
+
+  (install-microtask-scheduler!
+    (lambda (loop thunk)
+      (let ([timer (uv-timer-init loop)])
+        (uv-timer-start! timer 0 0
+          (lambda (t)
+            (uv-handle-close! t)
+            (thunk))))))
 
 ) ; end library

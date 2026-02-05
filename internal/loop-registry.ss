@@ -1,22 +1,14 @@
-;;; internal/loop-registry.ss - 循环注册表
+;;; internal/loop-registry.ss - 循环注册表与 uv-loop 记录类型
 ;;;
-;;; 本模块提供事件循环的全局注册和 per-loop 句柄注册功能。
-;;; 这是一个低层模块，被 ffi/callbacks.ss 和 low-level/handle-base.ss 使用，
-;;; 而不是直接依赖 high-level/event-loop.ss。
+;;; 本模块提供：
+;;; - uv-loop 记录类型定义（事件循环的核心数据结构）
+;;; - 事件循环的全局注册和 per-loop 句柄注册功能
+;;; - 临时缓冲区管理（用于 alloc 回调）
 ;;;
 ;;; 设计目的：
 ;;; 1. 打破循环依赖：low-level 模块不再需要导入 high-level/event-loop
 ;;; 2. 集中管理循环注册：全局循环查找 + per-loop 句柄注册
 ;;; 3. 临时缓冲区管理：用于 alloc 回调
-;;;
-;;; 设计说明：
-;;; 此模块定义通用的注册表操作函数，但实际的 loop 对象访问器
-;;; 需要由调用者提供。为了简化，我们假设 loop 对象具有以下字段：
-;;; - 第一个字段 (index 0): ptr - C 指针
-;;; - 第二个字段 (index 1): ptr-registry - 句柄注册表 (hashtable)
-;;; - 第四个字段 (index 3): temp-buffers - 临时缓冲区存储 (hashtable)
-;;;
-;;; 这与 high-level/event-loop.ss 中的 uv-loop 记录类型匹配。
 ;;;
 ;;; 全局状态说明：
 ;;; *loop-registry* 是必要的全局状态，用于 C 回调查找对应的 Scheme 循环对象。
@@ -24,6 +16,15 @@
 
 (library (chez-async internal loop-registry)
   (export
+    ;; uv-loop 记录类型及访问器
+    make-uv-loop
+    uv-loop?
+    uv-loop-ptr
+    uv-loop-ptr-registry
+    uv-loop-threadpool
+    uv-loop-threadpool-set!
+    uv-loop-temp-buffers
+
     ;; 全局循环注册表操作
     register-loop!           ; 注册循环到全局注册表
     unregister-loop!         ; 从全局注册表注销循环
@@ -41,6 +42,34 @@
   (import (chezscheme))
 
   ;; ========================================
+  ;; uv-loop 记录类型
+  ;; ========================================
+  ;;
+  ;; uv-loop 记录类型包含：
+  ;; - ptr: libuv uv_loop_t 的 C 指针
+  ;; - ptr-registry: C 指针到 Scheme 包装器的哈希表
+  ;; - threadpool: 关联的线程池（可选）
+  ;; - temp-buffers: 临时缓冲区存储（用于 alloc 回调）
+  ;;
+  ;; 所有 per-loop 状态都存储在此记录中，避免全局变量
+
+  (define-record-type uv-loop
+    (fields
+      (immutable ptr)            ; uv_loop_t* C 指针
+      (immutable ptr-registry)   ; hashtable: C 指针 -> Scheme 包装器
+      (mutable threadpool)       ; 关联的线程池（懒初始化）
+      (immutable temp-buffers))  ; hashtable: handle-ptr -> temp buffer
+    (protocol
+      (lambda (new)
+        (lambda (ptr)
+          (lock-object ptr)
+          (new ptr
+               (make-eqv-hashtable)  ; ptr-registry
+               #f                     ; threadpool (initially none)
+               (make-eqv-hashtable)  ; temp-buffers
+               )))))
+
+  ;; ========================================
   ;; 全局循环注册表
   ;; ========================================
   ;;
@@ -53,43 +82,18 @@
   (define *loop-registry* (make-eqv-hashtable))
 
   ;; ========================================
-  ;; 内部辅助函数 - 访问 loop 记录字段
-  ;; ========================================
-  ;;
-  ;; 使用直接的记录字段访问，假设 loop 是 uv-loop 记录类型：
-  ;; - field 0: ptr
-  ;; - field 1: ptr-registry
-  ;; - field 2: threadpool
-  ;; - field 3: temp-buffers
-
-  (define (loop-ptr loop)
-    "获取循环的 C 指针（第一个字段）"
-    (let ([rtd (record-rtd loop)])
-      ((record-accessor rtd 0) loop)))
-
-  (define (loop-ptr-registry loop)
-    "获取循环的句柄注册表（第二个字段）"
-    (let ([rtd (record-rtd loop)])
-      ((record-accessor rtd 1) loop)))
-
-  (define (loop-temp-buffers loop)
-    "获取循环的临时缓冲区存储（第四个字段）"
-    (let ([rtd (record-rtd loop)])
-      ((record-accessor rtd 3) loop)))
-
-  ;; ========================================
   ;; 全局循环注册表操作
   ;; ========================================
 
   (define (register-loop! loop)
     "注册 loop 到全局注册表
      loop: 事件循环对象"
-    (hashtable-set! *loop-registry* (loop-ptr loop) loop))
+    (hashtable-set! *loop-registry* (uv-loop-ptr loop) loop))
 
   (define (unregister-loop! loop)
     "从全局注册表注销 loop
      loop: 事件循环对象"
-    (hashtable-delete! *loop-registry* (loop-ptr loop)))
+    (hashtable-delete! *loop-registry* (uv-loop-ptr loop)))
 
   (define (get-loop-by-ptr ptr)
     "通过 C 指针查找 loop 包装器
@@ -114,20 +118,20 @@
      loop: 事件循环
      ptr: C 指针（handle 的地址）
      wrapper: 对应的 Scheme 包装器对象"
-    (hashtable-set! (loop-ptr-registry loop) ptr wrapper))
+    (hashtable-set! (uv-loop-ptr-registry loop) ptr wrapper))
 
   (define (loop-unregister-wrapper! loop ptr)
     "注销 C 指针的映射（通常在 handle 关闭时调用）
      loop: 事件循环
      ptr: 要注销的 C 指针"
-    (hashtable-delete! (loop-ptr-registry loop) ptr))
+    (hashtable-delete! (uv-loop-ptr-registry loop) ptr))
 
   (define (loop-get-wrapper loop ptr)
     "从 C 指针获取 Scheme 包装器
      loop: 事件循环
      ptr: C 指针
      返回: 包装器对象，如果未找到则返回 #f"
-    (hashtable-ref (loop-ptr-registry loop) ptr #f))
+    (hashtable-ref (uv-loop-ptr-registry loop) ptr #f))
 
   ;; ========================================
   ;; 临时缓冲区管理（Per-loop）
@@ -141,16 +145,16 @@
      loop: 事件循环
      handle-ptr: handle 的 C 指针
      buffer-ptr: 分配的缓冲区指针"
-    (hashtable-set! (loop-temp-buffers loop) handle-ptr buffer-ptr))
+    (hashtable-set! (uv-loop-temp-buffers loop) handle-ptr buffer-ptr))
 
   (define (loop-get-temp-buffer loop handle-ptr)
     "获取并移除临时缓冲区
      loop: 事件循环
      handle-ptr: handle 的 C 指针
      返回: 缓冲区指针，如果未找到则返回 #f"
-    (let ([buffer (hashtable-ref (loop-temp-buffers loop) handle-ptr #f)])
+    (let ([buffer (hashtable-ref (uv-loop-temp-buffers loop) handle-ptr #f)])
       (when buffer
-        (hashtable-delete! (loop-temp-buffers loop) handle-ptr))
+        (hashtable-delete! (uv-loop-temp-buffers loop) handle-ptr))
       buffer))
 
 ) ; end library

@@ -36,8 +36,10 @@
 
   (import (chezscheme)
           (chez-async internal coroutine)
-          (chez-async high-level promise)
-          (chez-async high-level event-loop))
+          (chez-async internal promise-core)
+          (chez-async internal loop-registry)
+          (chez-async ffi types)
+          (chez-async ffi core))
 
   ;; ========================================
   ;; 简单队列实现（FIFO）
@@ -341,7 +343,7 @@
           ;; 情况 2: 有等待中的协程，运行事件循环
           [(> (hashtable-size (scheduler-state-pending sched)) 0)
            ;; 运行一次 libuv 事件循环
-           (uv-run loop 'once)
+           (%ffi-uv-run (uv-loop-ptr loop) (uv-run-mode->int 'once))
            (scheduler-loop)]
 
           ;; 情况 3: 所有协程完成
