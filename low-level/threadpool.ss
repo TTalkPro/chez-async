@@ -64,8 +64,10 @@
       (immutable result-queue)    ; 完成结果队列
       (mutable async-handle)      ; uv_async_t 句柄
       (immutable task-map)        ; task-id → task 映射
-      (immutable shutdown-mutex)  ; 关闭同步
-      (mutable next-task-id)))    ; 下一个任务 ID
+      (immutable shutdown-mutex)  ; 关闭同步（兼用于 active-workers）
+      (mutable next-task-id)      ; 下一个任务 ID
+      (mutable active-workers)    ; 还在运行的工作线程数
+      (immutable all-done-cond))) ; 所有工作线程退出后 broadcast
 
   ;; ========================================
   ;; 队列操作
@@ -99,27 +101,19 @@
       (task-queue-out-set! q (cdr (task-queue-out q)))
       item))
 
-  (define (queue-try-pop! q timeout-ms)
-    "尝试从队列获取项（带超时，毫秒）"
+  (define (queue-pop! q running?)
+    "从队列获取项，阻塞直到有任务或 running? 返回 #f
+     running?: (lambda () bool) — 返回 #f 时退出等待，函数返回 #f"
     (with-mutex (task-queue-mutex q)
-      (let loop ([remaining-ms timeout-ms])
+      (let loop ()
         (cond
+          [(not (running?)) #f]
           [(not (task-queue-empty? q))
            (task-queue-pop-internal! q)]
-          [(<= remaining-ms 0)
-           #f]
           [else
-           ;; 等待一小段时间
-           (let ([start-time (current-time 'time-monotonic)])
-             (condition-wait (task-queue-not-empty q)
-                           (task-queue-mutex q)
-                           (make-time 'time-duration
-                                    0
-                                    (quotient remaining-ms 1000)))
-             (let* ([elapsed (time-difference (current-time 'time-monotonic) start-time)]
-                    [elapsed-ms (+ (* (time-second elapsed) 1000)
-                                  (quotient (time-nanosecond elapsed) 1000000))])
-               (loop (- remaining-ms elapsed-ms))))]))))
+           (condition-wait (task-queue-not-empty q)
+                           (task-queue-mutex q))
+           (loop)]))))
 
   (define (queue-pop-all! q)
     "获取并清空队列中的所有项"
@@ -135,26 +129,32 @@
   ;; ========================================
 
   (define (worker-thread-proc pool)
-    "工作线程主循环"
+    "工作线程主循环：阻塞等待任务，shutdown 时由 condition-broadcast 唤醒退出"
     (let loop ()
-      (when (threadpool-running? pool)
-        (let ([task (queue-try-pop! (threadpool-task-queue pool) 100)])
-          (when task
-            ;; 执行任务并捕获结果或异常
-            (let ([result
-                   (guard (e [else (make-task-result (task-id task) #f e)])
-                     (let ([value ((task-work task))])
-                       (make-task-result (task-id task) #t value)))])
-              ;; 将结果放入结果队列
-              (queue-push! (threadpool-result-queue pool) result)
-              ;; 通知主线程
-              (let ([async-h (threadpool-async-handle pool)])
-                (when async-h
-                  (guard (e [else
-                             (fprintf (current-error-port)
-                                     "Error sending async notification: ~a~n" e)])
-                    (uv-async-send! async-h)))))))
-        (loop))))
+      (let ([task (queue-pop! (threadpool-task-queue pool)
+                              (lambda () (threadpool-running? pool)))])
+        (when task
+          ;; 执行任务并捕获结果或异常
+          (let ([result
+                 (guard (e [else (make-task-result (task-id task) #f e)])
+                   (let ([value ((task-work task))])
+                     (make-task-result (task-id task) #t value)))])
+            ;; 将结果放入结果队列
+            (queue-push! (threadpool-result-queue pool) result)
+            ;; 通知主线程
+            (let ([async-h (threadpool-async-handle pool)])
+              (when async-h
+                (guard (e [else
+                           (fprintf (current-error-port)
+                                   "Error sending async notification: ~a~n" e)])
+                  (uv-async-send! async-h)))))
+          (loop))))
+    ;; 线程退出：递减计数，最后一个线程 broadcast 通知 shutdown
+    (with-mutex (threadpool-shutdown-mutex pool)
+      (threadpool-active-workers-set! pool
+        (- (threadpool-active-workers pool) 1))
+      (when (= (threadpool-active-workers pool) 0)
+        (condition-broadcast (threadpool-all-done-cond pool)))))
 
   ;; ========================================
   ;; 结果处理（主线程）
@@ -199,7 +199,9 @@
       #f                          ; async-handle
       (make-eq-hashtable)         ; task-map
       (make-mutex)                ; shutdown-mutex
-      0))                         ; next-task-id
+      0                           ; next-task-id
+      0                           ; active-workers
+      (make-condition)))          ; all-done-cond
 
   (define (threadpool-start! pool)
     "启动线程池（创建 async 句柄和工作线程）"
@@ -209,8 +211,9 @@
                                    (lambda (wrapper)
                                      (process-results pool)))])
         (threadpool-async-handle-set! pool async-h))
-      ;; 设置运行标志
+      ;; 设置运行标志和活跃线程计数（在 fork 前设置，避免线程启动后立即退出）
       (threadpool-running?-set! pool #t)
+      (threadpool-active-workers-set! pool (threadpool-size pool))
       ;; 创建工作线程
       (let ([workers
              (let loop ([i 0] [acc '()])
@@ -248,19 +251,23 @@
     "关闭线程池"
     (with-mutex (threadpool-shutdown-mutex pool)
       (when (threadpool-running? pool)
-        ;; 设置运行标志为 false
+        ;; 1. 设置关闭标志
         (threadpool-running?-set! pool #f)
-        ;; 等待足够长的时间让线程退出
-        ;; 在 FreeBSD 上，线程调度可能与 Linux 不同，需要更长的等待时间
-        (sleep (make-time 'time-duration 500000000 0)) ; 500ms
-        ;; 关闭 async 句柄（在线程退出之后）
+        ;; 2. 唤醒所有阻塞在 queue-pop! 中的工作线程
+        (with-mutex (task-queue-mutex (threadpool-task-queue pool))
+          (condition-broadcast (task-queue-not-empty (threadpool-task-queue pool))))
+        ;; 3. 等待所有工作线程退出（condition-wait 会原子释放 shutdown-mutex）
+        (let wait ()
+          (when (> (threadpool-active-workers pool) 0)
+            (condition-wait (threadpool-all-done-cond pool)
+                            (threadpool-shutdown-mutex pool))
+            (wait)))
+        ;; 4. 关闭 async 句柄
         (let ([async-h (threadpool-async-handle pool)])
           (when async-h
             (uv-handle-close! async-h)
             (threadpool-async-handle-set! pool #f)))
-        ;; 再等待一小段时间确保 async handle 完全关闭
-        (sleep (make-time 'time-duration 100000000 0)) ; 100ms
-        ;; 清空任务映射
+        ;; 5. 清空任务映射
         (let ([task-map (threadpool-task-map pool)])
           (vector-for-each
             (lambda (task)
