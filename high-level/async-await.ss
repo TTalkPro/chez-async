@@ -20,6 +20,7 @@
   (export
     ;; 核心宏
     async
+    async/loop
     await
     async*
 
@@ -36,6 +37,17 @@
           (chez-async internal scheduler)
           (chez-async high-level promise)
           (chez-async high-level event-loop))
+
+  ;; ========================================
+  ;; 辅助：获取当前 loop
+  ;; ========================================
+  ;;
+  ;; 在协程内继承父协程的 loop，否则回退到 default loop。
+
+  (define (get-loop)
+    (cond
+      [(current-coroutine) => coroutine-loop]
+      [else (uv-default-loop)]))
 
   ;; ========================================
   ;; await 宏
@@ -65,21 +77,19 @@
   (define-syntax async
     (syntax-rules ()
       [(async body ...)
-       (let ([loop (uv-default-loop)])
-         ;; 创建 Promise 包装协程
+       (async/loop (get-loop) body ...)]))
+
+  (define-syntax async/loop
+    (syntax-rules ()
+      [(async/loop loop-expr body ...)
+       (let ([loop loop-expr])
          (make-promise loop
            (lambda (resolve reject)
-             ;; 生成协程
              (spawn-coroutine! loop
                (lambda ()
-                 ;; 捕获异常
                  (guard (ex
-                         [else
-                          ;; 拒绝 Promise
-                          (reject ex)])
-                   ;; 执行 body
+                         [else (reject ex)])
                    (let ([result (begin body ...)])
-                     ;; 解决 Promise
                      (resolve result))))))))]))
 
   ;; ========================================
@@ -114,10 +124,8 @@
 
      这是一个同步函数，会阻塞直到 Promise 完成。
      主要用于顶层或测试代码。"
-    (let ([loop (uv-default-loop)])
-      ;; 运行调度器
+    (let ([loop (get-loop)])
       (run-scheduler loop)
-      ;; 等待 Promise 完成
       (promise-wait promise)))
 
   (define (run-async-loop . args)
@@ -126,7 +134,7 @@
      args: 传递给 uv-run 的参数（可选）
 
      这是 uv-run 的协程友好版本。"
-    (let ([loop (uv-default-loop)]
+    (let ([loop (get-loop)]
           [mode (if (null? args) 'default (car args))])
       (run-scheduler loop)))
 
