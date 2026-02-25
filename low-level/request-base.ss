@@ -27,7 +27,8 @@
           (chez-async ffi types)
           (chez-async ffi errors)
           (chez-async ffi requests)
-          (chez-async ffi callbacks))
+          (chez-async ffi callbacks)
+          (only (chez-async internal foreign-utils) allocate-zeroed))
 
   ;; ========================================
   ;; 请求包装器记录类型
@@ -56,14 +57,8 @@
   ;; ========================================
 
   (define (allocate-request size)
-    "分配请求内存"
-    (let ([ptr (foreign-alloc size)])
-      ;; 初始化为 0
-      (let loop ([i 0])
-        (when (< i size)
-          (foreign-set! 'unsigned-8 ptr i 0)
-          (loop (+ i 1))))
-      ptr))
+    "分配请求内存（清零初始化）"
+    (allocate-zeroed size))
 
   (define (store-wrapper-in-request! request-ptr wrapper)
     "将包装器对象存储到请求全局注册表"

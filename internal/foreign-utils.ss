@@ -111,13 +111,16 @@
   ;;
   ;; 返回：
   ;;   指向新分配内存的指针，所有字节初始化为 0
+  ;;
+  ;; 实现：使用 calloc(1, size)，与 foreign-free/safe-free 完全兼容
+  ;;   （foreign-alloc = malloc，foreign-free = free，calloc 与 free 同堆）
+  (define %calloc (foreign-procedure "calloc" (size_t size_t) void*))
+
   (define (allocate-zeroed size)
     "分配指定大小的内存并初始化为零"
-    (let ([ptr (foreign-alloc size)])
-      ;; 初始化为零
-      (do ([i 0 (+ i 1)])
-          ((= i size))
-        (foreign-set! 'unsigned-8 ptr i 0))
+    (let ([ptr (%calloc 1 size)])
+      (when (= ptr 0)
+        (error 'allocate-zeroed "out of memory" size))
       ptr))
 
   ;; safe-free: 安全释放内存
