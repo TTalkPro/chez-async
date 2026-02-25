@@ -23,25 +23,15 @@
 
   (define (make-uv-buf bv)
     "将 Scheme bytevector 转换为 uv_buf_t*
-     注意：调用者负责锁定 bytevector 并在使用后解锁"
+     注意：调用者负责锁定 bytevector 并在使用后解锁
+     注意：Chez Scheme 不直接暴露 bytevector 内部指针，base 字段为 0（未实现）"
     (let* ([len (bytevector-length bv)]
            [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))])
-      ;; 锁定 bytevector 防止 GC 移动
       (lock-object bv)
-      ;; 设置 uv_buf_t 字段
-      (ftype-set! uv-buf-t (base) buf-ptr
-                  (foreign-ref 'void*
-                               (foreign-alloc (foreign-sizeof 'void*))
-                               0))
-      ;; 复制 bytevector 地址
-      (let ([base-ptr (ftype-ref uv-buf-t (base) buf-ptr)])
-        (foreign-set! 'void* base-ptr 0
-                      (+ (foreign-ref 'void* (foreign-alloc (foreign-sizeof 'void*)) 0)
-                         0)))
-      ;; 实际上应该直接使用 bytevector 的内部指针
-      ;; 但 Chez 不直接暴露，需要通过技巧获取
+      ;; Chez Scheme 不直接暴露 bytevector 的内部指针，需要平台特定实现
+      (ftype-set! uv-buf-t (base) buf-ptr 0)
       (ftype-set! uv-buf-t (len) buf-ptr len)
-      (cons buf-ptr bv)))  ; 返回 cons 以保持 bv 引用
+      (cons buf-ptr bv)))
 
   ;; 更简单的实现：使用预分配的 C 缓冲区
   (define (make-uv-buf-from-c-memory size)

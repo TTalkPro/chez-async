@@ -196,17 +196,17 @@
 
   (define (addr->ip6-string addr-bv)
     "将 16 字节的 bytevector 转换为 IPv6 字符串"
-    ;; 简化实现
     (let* ([addr-ptr (foreign-alloc sockaddr-in6-size)]
            [fptr (make-ftype-pointer sockaddr-in6 addr-ptr)])
-      ;; 设置地址族
       (ftype-set! sockaddr-in6 (sin6-family) fptr AF_INET6)
-      ;; 复制地址字节
       (do ([i 0 (+ i 1)])
           ((= i 16))
         (ftype-set! sockaddr-in6 (sin6-addr i) fptr
                     (bytevector-u8-ref addr-bv i)))
-      (sockaddr-in6-addr addr-ptr)))
+      (guard (e [else (foreign-free addr-ptr) (raise e)])
+        (let ([result (sockaddr-in6-addr addr-ptr)])
+          (foreign-free addr-ptr)
+          result))))
 
   ;; ========================================
   ;; 通用地址解析
