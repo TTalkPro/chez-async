@@ -141,6 +141,9 @@
                data-or-error 为 bytevector（成功）、#f（EOF）或 error（错误）"
     (when (handle-closed? stream)
       (error 'uv-read-start! "stream is closed"))
+    ;; 释放旧的回调数据
+    (let ([old-data (handle-data stream)])
+      (when old-data (unlock-object old-data)))
     ;; 保存回调和 alloc 缓冲区指针
     (let ([read-data (list callback #f)])  ; (user-callback alloc-ptr)
       (handle-data-set! stream read-data)
@@ -268,6 +271,9 @@
      callback: 回调函数 (lambda (server error-or-#f) ...)"
     (when (handle-closed? stream)
       (error 'uv-listen! "stream is closed"))
+    ;; 释放旧回调
+    (let ([old-data (handle-data stream)])
+      (when old-data (unlock-object old-data)))
     ;; 保存连接回调
     (handle-data-set! stream callback)
     (lock-object callback)

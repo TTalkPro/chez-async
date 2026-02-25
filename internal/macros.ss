@@ -288,21 +288,24 @@
   ;;
   ;; 用法：
   ;;   (define-handle-start! start!-name ffi-start-fn callback-getter
-  ;;     handle-ptr-fn handle-data-set-fn handle-closed?-fn)
+  ;;     handle-ptr-fn handle-data-fn handle-data-set-fn handle-closed?-fn)
   ;;
   ;; 展开为标准的句柄启动函数，支持可变参数
   ;;
   ;; 示例：
   ;;   (define-handle-start! uv-timer-start! %ffi-uv-timer-start get-timer-callback
-  ;;     handle-ptr handle-data-set! handle-closed?)
+  ;;     handle-ptr handle-data handle-data-set! handle-closed?)
 
   (define-syntax define-handle-start!
     (syntax-rules ()
       [(_ start!-name ffi-start-fn callback-getter
-          handle-ptr-fn handle-data-set-fn handle-closed?-fn)
+          handle-ptr-fn handle-data-fn handle-data-set-fn handle-closed?-fn)
        (define (start!-name handle callback . args)
          (when (handle-closed?-fn handle)
            (error 'start!-name "handle is closed"))
+         ;; 释放旧回调
+         (let ([old-data (handle-data-fn handle)])
+           (when old-data (unlock-object old-data)))
          ;; 保存用户回调
          (handle-data-set-fn handle callback)
          (lock-object callback)
