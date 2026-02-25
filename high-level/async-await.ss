@@ -39,17 +39,6 @@
           (chez-async high-level event-loop))
 
   ;; ========================================
-  ;; 辅助：获取当前 loop
-  ;; ========================================
-  ;;
-  ;; 在协程内继承父协程的 loop，否则回退到 default loop。
-
-  (define (get-loop)
-    (cond
-      [(current-coroutine) => coroutine-loop]
-      [else (uv-default-loop)]))
-
-  ;; ========================================
   ;; await 宏
   ;; ========================================
   ;;
@@ -77,7 +66,7 @@
   (define-syntax async
     (syntax-rules ()
       [(async body ...)
-       (async/loop (get-loop) body ...)]))
+       (async/loop (uv-default-loop) body ...)]))
 
   (define-syntax async/loop
     (syntax-rules ()
@@ -124,7 +113,7 @@
 
      这是一个同步函数，会阻塞直到 Promise 完成。
      主要用于顶层或测试代码。"
-    (let ([loop (get-loop)])
+    (let ([loop (uv-default-loop)])
       (run-scheduler loop)
       (promise-wait promise)))
 
@@ -134,7 +123,7 @@
      args: 传递给 uv-run 的参数（可选）
 
      这是 uv-run 的协程友好版本。"
-    (let ([loop (get-loop)]
+    (let ([loop (uv-default-loop)]
           [mode (if (null? args) 'default (car args))])
       (run-scheduler loop)))
 
