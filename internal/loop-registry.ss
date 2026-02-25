@@ -23,6 +23,8 @@
     uv-loop-ptr-registry
     uv-loop-threadpool
     uv-loop-threadpool-set!
+    uv-loop-scheduler
+    uv-loop-scheduler-set!
     uv-loop-temp-buffers
 
     ;; 全局循环注册表操作
@@ -58,6 +60,7 @@
       (immutable ptr)            ; uv_loop_t* C 指针
       (immutable ptr-registry)   ; hashtable: C 指针 -> Scheme 包装器
       (mutable threadpool)       ; 关联的线程池（懒初始化）
+      (mutable scheduler)        ; 关联的调度器（懒初始化）
       (immutable temp-buffers))  ; hashtable: handle-ptr -> temp buffer
     (protocol
       (lambda (new)
@@ -66,6 +69,7 @@
           (new ptr
                (make-eqv-hashtable)  ; ptr-registry
                #f                     ; threadpool (initially none)
+               #f                     ; scheduler (initially none)
                (make-eqv-hashtable)  ; temp-buffers
                )))))
 

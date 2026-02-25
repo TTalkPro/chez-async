@@ -113,17 +113,14 @@
                loop)))))
 
   ;; ========================================
-  ;; 全局调度器表（每个 uv-loop 一个调度器）
+  ;; 调度器访问（存储在 uv-loop 字段中）
   ;; ========================================
-
-  ;; 使用弱引用表存储 loop -> scheduler 映射
-  (define scheduler-table (make-weak-eq-hashtable))
 
   (define (get-scheduler loop)
     "获取或创建事件循环的调度器"
-    (or (hashtable-ref scheduler-table loop #f)
+    (or (uv-loop-scheduler loop)
         (let ([sched (make-scheduler-state loop)])
-          (hashtable-set! scheduler-table loop sched)
+          (uv-loop-scheduler-set! loop sched)
           sched)))
 
   ;; ========================================
