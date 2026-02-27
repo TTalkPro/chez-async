@@ -41,64 +41,19 @@
     O_CREAT
     O_TRUNC
     )
-  (import (chezscheme))
-
-  ;; ========================================
-  ;; libc 加载（封装在闭包中）
-  ;; ========================================
-  ;;
-  ;; libc 加载状态和加载逻辑封装在闭包中，避免模块级全局变量。
-  ;; ensure-libc-loaded! 在首次调用时尝试加载 libc，加载失败时抛出错误。
-
-  (define ensure-libc-loaded!
-    (let ([loaded? #f]
-          [load-error #f])
-      (lambda ()
-        (unless loaded?
-          (guard (e [else
-                      (set! load-error e)
-                      (error 'posix-ffi "libc not available or load failed")])
-            (cond
-              ;; Linux 64 位（最常见）
-              [(guard (e [else #f])
-                 (load-shared-object "/lib64/libc.so.6") #t)
-               (set! loaded? #t)]
-              ;; Linux 32 位
-              [(guard (e [else #f])
-                 (load-shared-object "/lib/libc.so.6") #t)
-               (set! loaded? #t)]
-              ;; Linux multiarch (Debian/Ubuntu)
-              [(guard (e [else #f])
-                 (load-shared-object "/lib/x86_64-linux-gnu/libc.so.6") #t)
-               (set! loaded? #t)]
-              ;; FreeBSD
-              [(guard (e [else #f])
-                 (load-shared-object "/lib/libc.so.7") #t)
-               (set! loaded? #t)]
-              ;; FreeBSD 较新版本
-              [(guard (e [else #f])
-                 (load-shared-object "/usr/lib/libc.so.7") #t)
-               (set! loaded? #t)]
-              ;; macOS
-              [(guard (e [else #f])
-                 (load-shared-object "/usr/lib/libc.dylib") #t)
-               (set! loaded? #t)]
-              ;; OpenBSD / NetBSD / 其他 BSD — 交由动态链接器解析
-              [(guard (e [else #f])
-                 (load-shared-object "libc.so") #t)
-               (set! loaded? #t)]
-              ;; 所有尝试均失败
-              [else
-               (set! load-error "Could not find libc on any known path")
-               (error 'posix-ffi "libc not available or load failed")]))))))
+  (import (chezscheme)
+          (chez-async internal foreign))
 
   ;; ========================================
   ;; POSIX 函数封装宏
   ;; ========================================
   ;;
+  ;; libc 加载逻辑由 internal/foreign.ss 的 ensure-libc-loaded! 统一提供，
+  ;; 避免重复的平台检测代码。
+  ;;
   ;; define-posix-call 宏消除 7 个 POSIX 函数包装器的重复模式。
   ;; 每个包装器：
-  ;; 1. 确保 libc 已加载
+  ;; 1. 确保 libc 已加载（ensure-libc-loaded!）
   ;; 2. 懒创建 foreign-procedure（首次调用时）
   ;; 3. 将参数转发给 C 函数
 

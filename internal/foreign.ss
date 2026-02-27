@@ -59,6 +59,9 @@
     with-temp-buffer          ; (with-temp-buffer (var size) body ...) — 临时外部内存
     with-read-buffer          ; (with-read-buffer buf-ptr nread bv-var body ...)
     with-write-buffers        ; (with-write-buffers ((buf ptr len) ...) bv body ...)
+
+    ;; libc 加载
+    ensure-libc-loaded!       ; () → void（确保 libc 已加载，供 foreign-procedure 使用）
     )
 
   (import (chezscheme)
@@ -128,6 +131,57 @@
            (lambda () (foreign-free var))))]))
 
   ;; ========================================
+  ;; libc 加载
+  ;; ========================================
+  ;;
+  ;; 某些平台（OpenBSD 等）的动态链接器不会将 libc 符号自动暴露给
+  ;; foreign-procedure，需要先通过 load-shared-object 显式加载 libc。
+  ;; ensure-libc-loaded! 按平台优先级尝试多个路径，首次成功后缓存状态。
+  ;; 本函数同时被 allocate-zeroed 和 internal/posix-ffi.ss 使用。
+
+  (define ensure-libc-loaded!
+    (let ([loaded? #f])
+      (lambda ()
+        (unless loaded?
+          (guard (e [else
+                      (error 'ensure-libc-loaded! "libc not available or load failed")])
+            (cond
+              ;; Linux 64 位（最常见）
+              [(guard (e [else #f])
+                 (load-shared-object "/lib64/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; Linux 32 位
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; Linux multiarch (Debian/Ubuntu)
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/x86_64-linux-gnu/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; Linux aarch64 multiarch
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/aarch64-linux-gnu/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; FreeBSD
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/libc.so.7") #t)
+               (set! loaded? #t)]
+              [(guard (e [else #f])
+                 (load-shared-object "/usr/lib/libc.so.7") #t)
+               (set! loaded? #t)]
+              ;; macOS
+              [(guard (e [else #f])
+                 (load-shared-object "/usr/lib/libc.dylib") #t)
+               (set! loaded? #t)]
+              ;; OpenBSD / NetBSD / 其他 — 交由动态链接器解析
+              [(guard (e [else #f])
+                 (load-shared-object "libc.so") #t)
+               (set! loaded? #t)]
+              ;; 所有尝试均失败
+              [else
+               (error 'ensure-libc-loaded! "libc not available or load failed")]))))))
+
+  ;; ========================================
   ;; 内存分配工具
   ;; ========================================
 
@@ -142,12 +196,13 @@
   ;; 说明：
   ;;   基于 calloc(1, size) 实现，与 foreign-free/safe-free 兼容。
   ;;   分配失败时抛出 'allocate-zeroed 错误。
-  ;;   calloc 的 foreign-procedure 绑定延迟到首次调用时创建，
-  ;;   确保共享库（libuv/libc）在此之前已加载。
+  ;;   首次调用时通过 ensure-libc-loaded! 确保 libc 已加载，
+  ;;   然后懒创建 foreign-procedure 绑定。
   (define allocate-zeroed
     (let ([proc #f])
       (lambda (size)
         (unless proc
+          (ensure-libc-loaded!)
           (set! proc (foreign-procedure "calloc" (size_t size_t) void*)))
         (let ([ptr (proc 1 size)])
           (when (= ptr 0)
