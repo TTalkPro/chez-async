@@ -19,8 +19,7 @@
           (chez-async low-level handle-base)
           (chez-async internal loop-registry)
           (chez-async internal macros)
-          (chez-async internal callback-registry)
-          (chez-async internal utils))
+          (chez-async internal callback-registry))
 
   ;; ========================================
   ;; 全局 Async 回调

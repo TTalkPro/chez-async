@@ -28,7 +28,7 @@
           (chez-async ffi errors)
           (chez-async ffi requests)
           (chez-async ffi callbacks)
-          (only (chez-async internal foreign-utils) allocate-zeroed))
+          (only (chez-async internal foreign) allocate-zeroed))
 
   ;; ========================================
   ;; 请求包装器记录类型

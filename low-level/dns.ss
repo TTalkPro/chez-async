@@ -33,8 +33,7 @@
           (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (only (chez-async internal foreign-utils) c-string->string)  ; 只导入 c-string->string
-          (chez-async internal utils))
+          (only (chez-async internal foreign) c-string->string))
 
   ;; ========================================
   ;; 全局回调（使用统一注册表管理）

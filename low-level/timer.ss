@@ -40,8 +40,7 @@
           (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (chez-async internal handle-utils)
-          (chez-async internal utils))
+          (chez-async internal handle-utils))
 
   ;; ========================================
   ;; 全局 Timer 回调

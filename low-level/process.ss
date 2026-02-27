@@ -54,7 +54,7 @@
           (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (chez-async internal utils))
+          (only (chez-async internal foreign) allocate-zeroed safe-free string->c-string))
 
   ;; ========================================
   ;; 进程退出回调
@@ -115,23 +115,6 @@
   ;; offset 56: stdio (uv_stdio_container_t*)
   ;; offset 64: uid (uv_uid_t)
   ;; offset 68: gid (uv_gid_t)
-
-  (define (string->c-string str)
-    "将 Scheme 字符串转换为 C 字符串
-
-     参数：
-       str - Scheme 字符串
-
-     返回：
-       malloc 分配的 C 字符串指针（需要手动释放）"
-    (let* ([bv (string->utf8 str)]
-           [len (bytevector-length bv)]
-           [ptr (foreign-alloc (+ len 1))])
-      (do ([i 0 (+ i 1)])
-          ((= i len))
-        (foreign-set! 'unsigned-8 ptr i (bytevector-u8-ref bv i)))
-      (foreign-set! 'unsigned-8 ptr len 0)  ; null terminator
-      ptr))
 
   (define (strings->c-string-array strs)
     "将字符串列表转换为 C 字符串数组

@@ -1,11 +1,20 @@
 ;;; low-level/udp.ss - UDP 低层封装
 ;;;
-;;; 提供 UDP 套接字的高层封装
+;;; 提供 libuv UDP 套接字的 Scheme 封装。
 ;;;
 ;;; UDP 与 TCP 的关键区别：
 ;;; - recv 回调签名不同，包含发送方地址和 flags 参数
 ;;; - send 需要目标地址参数（除非已 connect）
 ;;; - 不使用 stream 的读写函数，有自己独立的接口
+;;;
+;;; recv 回调状态机（nread 参数决定状态）：
+;;; - nread < 0          → 错误（UV_EOF=-4095 表示 EOF，其他为错误码）
+;;; - nread = 0, addr≠0  → 空数据报（合法的零长度 UDP 包）
+;;; - nread = 0, addr=0  → 没有更多数据（不调用用户回调）
+;;; - nread > 0          → 正常接收，从 uv_buf_t 提取数据并解析发送方地址
+;;;
+;;; 内存管理：与 stream 相同的 alloc/recv 两阶段回调模式，
+;;; handle-data 存储 (user-callback alloc-ptr) 列表。
 
 (library (chez-async low-level udp)
   (export
@@ -65,8 +74,7 @@
           (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (only (chez-async internal buffer-utils) foreign->bytevector)
-          (chez-async internal utils))
+          (only (chez-async internal foreign) foreign->bytevector))
 
   ;; ========================================
   ;; 常量
@@ -458,25 +466,30 @@
   ;; UDP 选项
   ;; ========================================
 
-  (define (uv-udp-set-broadcast! udp enable?)
-    "启用/禁用 SO_BROADCAST
-     udp: UDP 句柄
-     enable?: 是否启用"
-    (when (handle-closed? udp)
-      (error 'uv-udp-set-broadcast! "udp handle is closed"))
-    (with-uv-check uv-udp-set-broadcast
-      (%ffi-uv-udp-set-broadcast (handle-ptr udp) (if enable? 1 0))))
+  ;; bool 选项宏：closed 检查 + bool→int 转换 + uv 错误检查
+  (define-syntax define-udp-bool-option!
+    (syntax-rules ()
+      [(_ name ffi-fn)
+       (define (name udp enable?)
+         (when (handle-closed? udp)
+           (error 'name "udp handle is closed"))
+         (with-uv-check name
+           (ffi-fn (handle-ptr udp) (if enable? 1 0))))]))
 
-  (define (uv-udp-set-ttl! udp ttl)
-    "设置 IP_TTL
-     udp: UDP 句柄
-     ttl: TTL 值（1-255）"
-    (when (handle-closed? udp)
-      (error 'uv-udp-set-ttl! "udp handle is closed"))
-    (unless (and (>= ttl 1) (<= ttl 255))
-      (error 'uv-udp-set-ttl! "ttl must be between 1 and 255"))
-    (with-uv-check uv-udp-set-ttl
-      (%ffi-uv-udp-set-ttl (handle-ptr udp) ttl)))
+  ;; TTL 选项宏：closed 检查 + 范围校验 + uv 错误检查
+  (define-syntax define-udp-ttl-option!
+    (syntax-rules ()
+      [(_ name ffi-fn)
+       (define (name udp ttl)
+         (when (handle-closed? udp)
+           (error 'name "udp handle is closed"))
+         (unless (and (>= ttl 1) (<= ttl 255))
+           (error 'name "ttl must be between 1 and 255"))
+         (with-uv-check name
+           (ffi-fn (handle-ptr udp) ttl)))]))
+
+  (define-udp-bool-option! uv-udp-set-broadcast! %ffi-uv-udp-set-broadcast)
+  (define-udp-ttl-option! uv-udp-set-ttl! %ffi-uv-udp-set-ttl)
 
   (define uv-udp-join-multicast-group!
     (case-lambda
@@ -512,25 +525,8 @@
                                       interface-addr
                                       UV_LEAVE_GROUP))]))
 
-  (define (uv-udp-set-multicast-loop! udp enable?)
-    "启用/禁用 IP_MULTICAST_LOOP
-     udp: UDP 句柄
-     enable?: 是否启用"
-    (when (handle-closed? udp)
-      (error 'uv-udp-set-multicast-loop! "udp handle is closed"))
-    (with-uv-check uv-udp-set-multicast-loop
-      (%ffi-uv-udp-set-multicast-loop (handle-ptr udp) (if enable? 1 0))))
-
-  (define (uv-udp-set-multicast-ttl! udp ttl)
-    "设置 IP_MULTICAST_TTL
-     udp: UDP 句柄
-     ttl: TTL 值（1-255）"
-    (when (handle-closed? udp)
-      (error 'uv-udp-set-multicast-ttl! "udp handle is closed"))
-    (unless (and (>= ttl 1) (<= ttl 255))
-      (error 'uv-udp-set-multicast-ttl! "ttl must be between 1 and 255"))
-    (with-uv-check uv-udp-set-multicast-ttl
-      (%ffi-uv-udp-set-multicast-ttl (handle-ptr udp) ttl)))
+  (define-udp-bool-option! uv-udp-set-multicast-loop! %ffi-uv-udp-set-multicast-loop)
+  (define-udp-ttl-option! uv-udp-set-multicast-ttl! %ffi-uv-udp-set-multicast-ttl)
 
   (define (uv-udp-set-multicast-interface! udp interface-addr)
     "设置多播发送接口

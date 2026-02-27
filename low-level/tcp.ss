@@ -1,6 +1,16 @@
 ;;; low-level/tcp.ss - TCP 低层封装
 ;;;
-;;; 提供 TCP 套接字的高层封装
+;;; 提供 libuv TCP 套接字的 Scheme 封装。
+;;;
+;;; TCP 有两种使用模式：
+;;; 1. 服务器模式：init → bind → listen → accept（循环）
+;;;    - listen 通过 stream.ss 的 uv-listen! 注册连接回调
+;;;    - accept 创建新的 TCP 句柄并接受连接
+;;; 2. 客户端模式：init → connect → read/write
+;;;    - connect 是异步操作，通过请求包装器管理
+;;;
+;;; 读写操作继承自 stream.ss（TCP 是 libuv stream 的子类型），
+;;; 本模块重新导出 stream 操作以提供完整的 TCP API。
 
 (library (chez-async low-level tcp)
   (export
@@ -49,8 +59,7 @@
           (chez-async low-level sockaddr)
           (chez-async internal loop-registry)
           (chez-async internal macros)
-          (chez-async internal callback-registry)
-          (chez-async internal utils))
+          (chez-async internal callback-registry))
 
   ;; ========================================
   ;; 全局 Connect 回调

@@ -11,8 +11,9 @@
 ;;; 3. 临时缓冲区管理：用于 alloc 回调
 ;;;
 ;;; 全局状态说明：
-;;; *loop-registry* 是必要的全局状态，用于 C 回调查找对应的 Scheme 循环对象。
-;;; 这是因为 libuv 回调只提供 C 指针，我们需要从指针找到 Scheme 对象。
+;;; loop-registry 是必要的模块级状态（封装在闭包中），用于 C 回调查找对应的
+;;; Scheme 循环对象。这是因为 libuv 回调只提供 C 指针，我们需要从指针找到
+;;; Scheme 对象。命名遵循 Chez Scheme 惯例（无 CL 风格 earmuffs）。
 
 (library (chez-async internal loop-registry)
   (export
@@ -83,7 +84,7 @@
   ;;
   ;; 条目数量很少（通常只有 1-2 个 loop），所以影响很小。
 
-  (define *loop-registry* (make-eqv-hashtable))
+  (define loop-registry (make-eqv-hashtable))
 
   ;; ========================================
   ;; 全局循环注册表操作
@@ -92,18 +93,18 @@
   (define (register-loop! loop)
     "注册 loop 到全局注册表
      loop: 事件循环对象"
-    (hashtable-set! *loop-registry* (uv-loop-ptr loop) loop))
+    (hashtable-set! loop-registry (uv-loop-ptr loop) loop))
 
   (define (unregister-loop! loop)
     "从全局注册表注销 loop
      loop: 事件循环对象"
-    (hashtable-delete! *loop-registry* (uv-loop-ptr loop)))
+    (hashtable-delete! loop-registry (uv-loop-ptr loop)))
 
   (define (get-loop-by-ptr ptr)
     "通过 C 指针查找 loop 包装器
      ptr: uv_loop_t* C 指针
      返回: loop 包装器，如果未找到则返回 #f"
-    (hashtable-ref *loop-registry* ptr #f))
+    (hashtable-ref loop-registry ptr #f))
 
   ;; ========================================
   ;; Per-loop 句柄注册操作

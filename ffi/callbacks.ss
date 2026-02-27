@@ -12,7 +12,7 @@
 ;;;
 ;;; GC 保护说明：
 ;;; foreign-callable 的 GC 保护由 internal/callback-registry.ss 的
-;;; *callback-registry* 提供。当 foreign-callable 存储在 callback-registry
+;;; 回调注册表提供。当 foreign-callable 存储在 callback-registry
 ;;; 的 instance 部分时，它不会被 GC 回收。
 ;;;
 ;;; 设计说明：

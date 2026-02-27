@@ -1,29 +1,40 @@
 ;;; internal/posix-ffi.ss - POSIX 系统调用封装
 ;;;
-;;; 本模块提供：
-;;; - 常用 POSIX 系统调用的 FFI 绑定（pipe, close, read, write, kill 等）
-;;; - 自动检测并加载平台 libc（支持 Linux, FreeBSD, macOS, OpenBSD）
-;;; - 文件操作常量（O_RDONLY, O_WRONLY 等）
+;;; 本模块提供常用 POSIX 系统调用的 FFI 绑定：
+;;;
+;;; 系统调用：
+;;;   posix-pipe    - 创建管道 (pipe)
+;;;   posix-close   - 关闭文件描述符 (close)
+;;;   posix-write   - 写数据 (write)
+;;;   posix-read    - 读数据 (read)
+;;;   posix-kill    - 发送信号 (kill)
+;;;   posix-isatty  - 检查终端 (isatty)
+;;;   posix-getpid  - 获取进程 ID (getpid)
+;;;
+;;; 常量：
+;;;   O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC
 ;;;
 ;;; 设计说明：
-;;; - 采用懒加载策略，首次调用时自动加载 libc
-;;; - 各平台路径按常见度排序尝试
+;;; - 采用懒加载策略，首次调用时自动检测并加载平台 libc
+;;; - 支持 Linux（64/32 位、multiarch）、FreeBSD、macOS、OpenBSD
+;;; - libc 加载状态封装在闭包中，不暴露全局变量
+;;; - 使用 define-posix-call 宏消除 7 个函数包装器的重复模式
 
 (library (chez-async internal posix-ffi)
   (export
     ;; 系统调用封装
-    posix-pipe
-    posix-close
-    posix-write
-    posix-read
-    posix-kill
-    posix-isatty
-    posix-getpid
+    posix-pipe                ; (fd-array-ptr) → int
+    posix-close               ; (fd) → int
+    posix-write               ; (fd buf count) → ssize_t
+    posix-read                ; (fd buf count) → ssize_t
+    posix-kill                ; (pid signal) → int
+    posix-isatty              ; (fd) → int
+    posix-getpid              ; () → int
 
     ;; 可用性检查
-    posix-ffi-available?
+    posix-ffi-available?      ; () → boolean
 
-    ;; 常量
+    ;; 文件操作常量
     O_RDONLY
     O_WRONLY
     O_RDWR
@@ -33,134 +44,141 @@
   (import (chezscheme))
 
   ;; ========================================
-  ;; 自动加载 libc
+  ;; libc 加载（封装在闭包中）
   ;; ========================================
+  ;;
+  ;; libc 加载状态和加载逻辑封装在闭包中，避免模块级全局变量。
+  ;; ensure-libc-loaded! 在首次调用时尝试加载 libc，加载失败时抛出错误。
 
-  (define libc-loaded? #f)
-  (define libc-load-error #f)
-
-  (define (try-load-libc)
-    "尝试自动加载系统 libc"
-    (when (not libc-loaded?)
-      (guard (e [else
-                  (set! libc-load-error e)
-                  (set! libc-loaded? #f)
-                  #f])
-        ;; 按平台路径依次尝试加载 libc
-        (cond
-          ;; Linux 64 位（最常见）
-          [(guard (e [else #f])
-             (load-shared-object "/lib64/libc.so.6")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; Linux 32 位
-          [(guard (e [else #f])
-             (load-shared-object "/lib/libc.so.6")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; Linux multiarch (Debian/Ubuntu)
-          [(guard (e [else #f])
-             (load-shared-object "/lib/x86_64-linux-gnu/libc.so.6")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; FreeBSD
-          [(guard (e [else #f])
-             (load-shared-object "/lib/libc.so.7")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; FreeBSD 较新版本
-          [(guard (e [else #f])
-             (load-shared-object "/usr/lib/libc.so.7")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; macOS
-          [(guard (e [else #f])
-             (load-shared-object "/usr/lib/libc.dylib")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; OpenBSD / NetBSD / 其他 BSD — 交由动态链接器解析
-          [(guard (e [else #f])
-             (load-shared-object "libc.so")
-             #t)
-           (set! libc-loaded? #t)]
-          ;; 所有尝试均失败
-          [else
-           (set! libc-load-error "Could not find libc on any known path")
-           #f]))))
+  (define ensure-libc-loaded!
+    (let ([loaded? #f]
+          [load-error #f])
+      (lambda ()
+        (unless loaded?
+          (guard (e [else
+                      (set! load-error e)
+                      (error 'posix-ffi "libc not available or load failed")])
+            (cond
+              ;; Linux 64 位（最常见）
+              [(guard (e [else #f])
+                 (load-shared-object "/lib64/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; Linux 32 位
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; Linux multiarch (Debian/Ubuntu)
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/x86_64-linux-gnu/libc.so.6") #t)
+               (set! loaded? #t)]
+              ;; FreeBSD
+              [(guard (e [else #f])
+                 (load-shared-object "/lib/libc.so.7") #t)
+               (set! loaded? #t)]
+              ;; FreeBSD 较新版本
+              [(guard (e [else #f])
+                 (load-shared-object "/usr/lib/libc.so.7") #t)
+               (set! loaded? #t)]
+              ;; macOS
+              [(guard (e [else #f])
+                 (load-shared-object "/usr/lib/libc.dylib") #t)
+               (set! loaded? #t)]
+              ;; OpenBSD / NetBSD / 其他 BSD — 交由动态链接器解析
+              [(guard (e [else #f])
+                 (load-shared-object "libc.so") #t)
+               (set! loaded? #t)]
+              ;; 所有尝试均失败
+              [else
+               (set! load-error "Could not find libc on any known path")
+               (error 'posix-ffi "libc not available or load failed")]))))))
 
   ;; ========================================
-  ;; POSIX 函数封装（懒加载）
+  ;; POSIX 函数封装宏
+  ;; ========================================
+  ;;
+  ;; define-posix-call 宏消除 7 个 POSIX 函数包装器的重复模式。
+  ;; 每个包装器：
+  ;; 1. 确保 libc 已加载
+  ;; 2. 懒创建 foreign-procedure（首次调用时）
+  ;; 3. 将参数转发给 C 函数
+
+  (define-syntax define-posix-call
+    (syntax-rules ()
+      [(_ name c-name (arg-types ...) return-type)
+       (define name
+         (let ([proc #f])
+           (lambda args
+             (ensure-libc-loaded!)
+             (unless proc
+               (set! proc (foreign-procedure c-name (arg-types ...) return-type)))
+             (apply proc args))))]))
+
+  ;; ========================================
+  ;; POSIX 系统调用定义
   ;; ========================================
 
-  (define posix-pipe
-    (lambda args
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "pipe" (uptr) int) (car args))
-          (error 'posix-pipe "libc not available or load failed"))))
+  ;; posix-pipe: 创建管道
+  ;; 参数：fd-array-ptr - 指向 int[2] 的指针
+  ;; 返回：成功时 0，失败时 -1
+  (define-posix-call posix-pipe "pipe" (uptr) int)
 
-  (define posix-close
-    (lambda args
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "close" (int) int) (car args))
-          (error 'posix-close "libc not available or load failed"))))
+  ;; posix-close: 关闭文件描述符
+  ;; 参数：fd - 文件描述符
+  ;; 返回：成功时 0，失败时 -1
+  (define-posix-call posix-close "close" (int) int)
 
-  (define posix-write
-    (lambda args
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "write" (int uptr uptr) ssize_t)
-           (car args) (cadr args) (caddr args))
-          (error 'posix-write "libc not available or load failed"))))
+  ;; posix-write: 写入数据
+  ;; 参数：fd - 文件描述符, buf - 缓冲区指针, count - 字节数
+  ;; 返回：写入的字节数，失败时 -1
+  (define-posix-call posix-write "write" (int uptr uptr) ssize_t)
 
-  (define posix-read
-    (lambda args
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "read" (int uptr uptr) ssize_t)
-           (car args) (cadr args) (caddr args))
-          (error 'posix-read "libc not available or load failed"))))
+  ;; posix-read: 读取数据
+  ;; 参数：fd - 文件描述符, buf - 缓冲区指针, count - 字节数
+  ;; 返回：读取的字节数，失败时 -1
+  (define-posix-call posix-read "read" (int uptr uptr) ssize_t)
 
-  (define posix-kill
-    (lambda args
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "kill" (int int) int)
-           (car args) (cadr args))
-          (error 'posix-kill "libc not available or load failed"))))
+  ;; posix-kill: 发送信号
+  ;; 参数：pid - 进程 ID, signal - 信号编号
+  ;; 返回：成功时 0，失败时 -1
+  (define-posix-call posix-kill "kill" (int int) int)
 
-  (define posix-isatty
-    (lambda args
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "isatty" (int) int) (car args))
-          (error 'posix-isatty "libc not available or load failed"))))
+  ;; posix-isatty: 检查是否为终端
+  ;; 参数：fd - 文件描述符
+  ;; 返回：是终端时 1，否则 0
+  (define-posix-call posix-isatty "isatty" (int) int)
 
-  (define posix-getpid
-    (lambda ()
-      (try-load-libc)
-      (if libc-loaded?
-          ((foreign-procedure "getpid" () int))
-          (error 'posix-getpid "libc not available or load failed"))))
+  ;; posix-getpid: 获取当前进程 ID
+  ;; 返回：进程 ID
+  (define-posix-call posix-getpid "getpid" () int)
 
   ;; ========================================
   ;; 可用性检查
   ;; ========================================
 
+  ;; posix-ffi-available?: 检查当前平台是否支持 POSIX FFI 调用
+  ;;
+  ;; 返回：
+  ;;   #t 如果 libc 已成功加载，#f 如果加载失败
+  ;;
+  ;; 说明：
+  ;;   此函数不会抛出异常，即使 libc 不可用也安全返回 #f。
   (define (posix-ffi-available?)
-    "检查当前平台是否支持 POSIX FFI 调用"
-    (try-load-libc)
-    libc-loaded?)
+    (guard (e [else #f])
+      (ensure-libc-loaded!)
+      #t))
 
   ;; ========================================
-  ;; 常量
+  ;; 文件操作常量
   ;; ========================================
+  ;;
+  ;; 这些是 Linux/POSIX 标准的文件打开标志。
+  ;; 注意：O_CREAT 和 O_TRUNC 的值在不同平台上可能不同，
+  ;; 以下为 Linux x86/x86_64 的值。
 
-  (define O_RDONLY 0)
-  (define O_WRONLY 1)
-  (define O_RDWR 2)
-  (define O_CREAT 64)    ; O_CREAT octal 0100
-  (define O_TRUNC 512)   ; O_TRUNC octal 01000
+  (define O_RDONLY 0)         ; 只读
+  (define O_WRONLY 1)         ; 只写
+  (define O_RDWR 2)           ; 读写
+  (define O_CREAT 64)         ; 不存在时创建（octal 0100）
+  (define O_TRUNC 512)        ; 截断已有内容（octal 01000）
 
-  ) ; end library
+) ; end library

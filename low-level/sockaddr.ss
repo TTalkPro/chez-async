@@ -40,7 +40,7 @@
           (chez-async ffi types)
           (chez-async ffi errors)
           (chez-async internal macros)
-          (only (chez-async internal foreign-utils) c-string->string))
+          (only (chez-async internal foreign) c-string->string))
 
   ;; ========================================
   ;; FFI 绑定：地址转换

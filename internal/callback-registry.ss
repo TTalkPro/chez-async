@@ -1,14 +1,16 @@
 ;;; internal/callback-registry.ss - 统一回调注册表
 ;;;
-;;; 本模块提供统一的回调管理机制，用于：
-;;; 1. 集中管理所有延迟初始化的回调
-;;; 2. 消除分散在各模块中的全局回调变量
-;;; 3. 提供类型安全的回调访问接口
+;;; 本模块提供统一的回调管理机制：
 ;;;
-;;; 设计原则：
-;;; - 回调按类型键索引，支持延迟初始化
-;;; - 一次注册，全局可用
-;;; - 线程安全（Chez Scheme 的 hashtable 是线程安全的）
+;;; 1. 注册回调工厂 —— register-lazy-callback! 注册创建回调的 thunk
+;;; 2. 获取入口点 —— get-callback-entry-point 延迟创建并返回 C 函数指针
+;;; 3. 检查注册状态 —— callback-registered? 查询是否已注册
+;;; 4. 回调类型常量 —— 20+ 个 CALLBACK-* 常量，按功能模块分组
+;;;
+;;; 设计说明：
+;;; - 回调按类型键索引，支持延迟初始化（首次获取时创建）
+;;; - 注册表封装在闭包中，通过函数接口访问
+;;; - 线程安全（Chez Scheme 的 eq-hashtable 操作是原子的）
 ;;;
 ;;; 使用方式：
 ;;;   ;; 在模块顶层注册回调工厂
@@ -131,67 +133,66 @@
   (define CALLBACK-PROCESS-EXIT 'process-exit)
 
   ;; ========================================
-  ;; 内部数据结构
+  ;; 注册表操作（封装在闭包中）
   ;; ========================================
+  ;;
+  ;; 回调注册表 hashtable 封装在闭包内部，通过三个函数访问：
+  ;; - register-lazy-callback!: 注册工厂
+  ;; - get-callback-entry-point: 获取/创建入口点
+  ;; - callback-registered?: 查询注册状态
+  ;;
+  ;; 内部数据结构：类型键 → (factory . instance)
+  ;; factory 是创建回调的 thunk，instance 是已创建的 foreign-callable（或 #f）
 
-  ;; 回调注册表：类型键 -> (factory . instance)
-  ;; factory 是创建回调的 thunk
-  ;; instance 是已创建的 foreign-callable（或 #f）
-  (define *callback-registry* (make-eq-hashtable))
+  (define-values (register-lazy-callback! get-callback-entry-point callback-registered?)
+    (let ([registry (make-eq-hashtable)])
 
-  ;; ========================================
-  ;; 公开接口
-  ;; ========================================
+      ;; register-lazy-callback!: 注册回调工厂
+      ;;
+      ;; 参数：
+      ;;   callback-key - 回调类型键（如 CALLBACK-TIMER）
+      ;;   factory      - 创建回调的 thunk，返回 foreign-callable
+      ;;
+      ;; 说明：
+      ;;   此函数仅注册工厂，实际回调在首次 get-callback-entry-point 时创建。
+      (define (register! callback-key factory)
+        (hashtable-set! registry callback-key (cons factory #f)))
 
-  ;; register-lazy-callback!: 注册回调工厂
-  ;;
-  ;; 参数：
-  ;;   callback-key - 回调类型键（如 CALLBACK-TIMER）
-  ;;   factory      - 创建回调的 thunk，返回 foreign-callable
-  ;;
-  ;; 说明：
-  ;;   此函数仅注册工厂，实际回调在首次使用时创建
-  (define (register-lazy-callback! callback-key factory)
-    "注册延迟初始化的回调工厂"
-    (hashtable-set! *callback-registry* callback-key (cons factory #f)))
+      ;; get-callback-entry-point: 获取回调入口点
+      ;;
+      ;; 参数：
+      ;;   callback-key - 回调类型键
+      ;;
+      ;; 返回：
+      ;;   回调函数的 C 入口点地址（foreign-callable-entry-point）
+      ;;
+      ;; 说明：
+      ;;   如果回调尚未创建，调用工厂创建它并缓存。
+      ;;   如果回调未注册，抛出错误。
+      (define (get-entry-point callback-key)
+        (let ([entry (hashtable-ref registry callback-key #f)])
+          (unless entry
+            (error 'get-callback-entry-point
+                   "callback not registered" callback-key))
+          (let ([factory (car entry)]
+                [instance (cdr entry)])
+            (if instance
+                (foreign-callable-entry-point instance)
+                (let ([new-instance (factory)])
+                  (hashtable-set! registry callback-key
+                                  (cons factory new-instance))
+                  (foreign-callable-entry-point new-instance))))))
 
-  ;; get-callback-entry-point: 获取回调入口点
-  ;;
-  ;; 参数：
-  ;;   callback-key - 回调类型键
-  ;;
-  ;; 返回：
-  ;;   回调函数的 C 入口点地址
-  ;;
-  ;; 说明：
-  ;;   如果回调尚未创建，会调用工厂创建它
-  ;;   如果回调未注册，抛出错误
-  (define (get-callback-entry-point callback-key)
-    "获取回调入口点（延迟创建）"
-    (let ([entry (hashtable-ref *callback-registry* callback-key #f)])
-      (unless entry
-        (error 'get-callback-entry-point
-               "callback not registered" callback-key))
-      (let ([factory (car entry)]
-            [instance (cdr entry)])
-        ;; 如果还没有创建实例，创建它
-        (if instance
-            (foreign-callable-entry-point instance)
-            (let ([new-instance (factory)])
-              ;; 更新注册表中的实例
-              (hashtable-set! *callback-registry* callback-key
-                              (cons factory new-instance))
-              (foreign-callable-entry-point new-instance))))))
+      ;; callback-registered?: 检查回调是否已注册
+      ;;
+      ;; 参数：
+      ;;   callback-key - 回调类型键
+      ;;
+      ;; 返回：
+      ;;   #t 如果已注册，否则 #f
+      (define (registered? callback-key)
+        (hashtable-contains? registry callback-key))
 
-  ;; callback-registered?: 检查回调是否已注册
-  ;;
-  ;; 参数：
-  ;;   callback-key - 回调类型键
-  ;;
-  ;; 返回：
-  ;;   #t 如果已注册，否则 #f
-  (define (callback-registered? callback-key)
-    "检查回调是否已注册"
-    (hashtable-contains? *callback-registry* callback-key))
+      (values register! get-entry-point registered?)))
 
 ) ; end library

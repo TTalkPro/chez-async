@@ -1,9 +1,19 @@
 ;;; internal/coroutine.ss - 协程数据结构
 ;;;
-;;; 提供基于 call/cc 的协程支持
+;;; 本模块提供基于 call/cc 的协程数据类型和状态管理：
 ;;;
+;;; 1. 协程记录类型 —— 包含 ID、状态、continuation、结果、关联事件循环
+;;; 2. 当前协程 —— 线程局部参数，跟踪当前执行的协程
+;;; 3. 状态查询 —— 便捷的状态判断函数
+;;; 4. ID 生成 —— 线程安全的唯一 ID 生成器
+;;;
+;;; 协程状态流转：
+;;;   created → running → suspended → running → completed
+;;;                    ↘            ↗         ↘ failed
+;;;
+;;; 设计说明：
 ;;; 协程是可以暂停和恢复的执行单元，通过 call/cc 捕获 continuation 实现。
-;;; 每个协程维护自己的执行状态和结果。
+;;; 每个协程维护自己的执行状态和结果。ID 生成器使用闭包封装计数器和互斥锁。
 
 (library (chez-async internal coroutine)
   (export
@@ -39,15 +49,17 @@
   ;; ========================================
   ;; 协程 ID 生成器
   ;; ========================================
+  ;;
+  ;; 使用闭包封装计数器和互斥锁，避免模块级全局变量。
+  ;; 生成格式为 coro-1, coro-2, ... 的唯一符号。
 
-  (define coroutine-counter 0)
-  (define coroutine-counter-mutex (make-mutex))
-
-  (define (generate-coroutine-id)
-    "生成唯一的协程 ID"
-    (with-mutex coroutine-counter-mutex
-      (set! coroutine-counter (+ coroutine-counter 1))
-      (string->symbol (format "coro-~a" coroutine-counter))))
+  (define generate-coroutine-id
+    (let ([counter 0]
+          [mutex (make-mutex)])
+      (lambda ()
+        (with-mutex mutex
+          (set! counter (+ counter 1))
+          (string->symbol (format "coro-~a" counter))))))
 
   ;; ========================================
   ;; 协程记录类型
@@ -78,42 +90,15 @@
   ;; ========================================
   ;; 当前协程（线程局部变量）
   ;; ========================================
-
-  ;; ========================================
-  ;; 当前协程（线程局部变量）
-  ;; ========================================
   ;;
-  ;; make-thread-parameter 是 Chez Scheme 的内置函数，用于创建线程局部参数
-  ;; 这是一种特殊的动态作用域变量，具有以下特点：
-  ;;
-  ;; 1. 每个线程都有独立的副本（线程安全）
-  ;; 2. 可以在线程内动态地设置和获取值
-  ;; 3. 支持参数验证（通过传入的 lambda 函数）
-  ;;
-  ;; 函数签名：(make-thread-parameter initial-value [validator])
-  ;;
-  ;; 参数说明：
-  ;;   - initial-value: 线程参数的初始值（默认值），这里设置为 #f 表示没有当前协程
-  ;;   - validator: 可选的验证器/转换器函数，当设置新值时自动调用
-  ;;
-  ;; 工作原理：
-  ;;   (current-coroutine)           ; 获取当前值
-  ;;   (current-coroutine some-coro) ; 设置新值，返回新值
-  ;;
-  ;; 验证器逻辑：
-  ;;   - 检查值是否为 #f 或 coroutine 类型
-  ;;   - 非法值会触发错误
-  ;;   - 验证通过后返回原值
-  ;;
-  ;; 在协程系统中的作用：
-  ;;   - 跟踪当前执行的协程
-  ;;   - 支持协程切换时的状态管理
-  ;;   - 提供类型安全保证
+  ;; 使用 make-thread-parameter 创建线程局部参数：
+  ;; - 每个线程有独立的副本（线程安全）
+  ;; - 验证器确保值为 coroutine 或 #f
+  ;; - 用于跟踪当前执行的协程，支持协程切换时的状态管理
 
   (define current-coroutine
     (make-thread-parameter #f
       (lambda (v)
-        "验证器：检查值是否为 coroutine 或 #f"
         (unless (or (not v) (coroutine? v))
           (error 'current-coroutine "Value must be a coroutine or #f" v))
         v)))

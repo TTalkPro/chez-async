@@ -1,6 +1,18 @@
 ;;; low-level/stream.ss - Stream 低层封装
 ;;;
-;;; 提供 Stream 操作的高层封装（用于 TCP、Pipe、TTY 等）
+;;; 提供 libuv Stream 操作的 Scheme 封装（用于 TCP、Pipe、TTY 等）。
+;;;
+;;; 读取流程（alloc/read 回调协作）：
+;;; 1. 调用 uv-read-start! 注册 alloc 和 read 两个回调
+;;; 2. 当数据到达时，libuv 先调用 alloc 回调分配缓冲区
+;;; 3. libuv 将数据写入该缓冲区，然后调用 read 回调
+;;; 4. read 回调从 C 内存复制数据到 Scheme bytevector，释放 C 缓冲区
+;;; 5. handle-data 存储 (user-callback alloc-ptr) 列表，用于协调两个回调
+;;;
+;;; 写入流程：
+;;; 1. uv-write! 将 bytevector 复制到 C 内存，创建 uv_buf_t
+;;; 2. write 回调在写入完成后释放 C 缓冲区，调用用户回调
+;;; 3. 缓冲区指针通过 uv-request-wrapper 的 scheme-data 字段传递
 
 (library (chez-async low-level stream)
   (export
@@ -39,11 +51,9 @@
           (chez-async ffi callbacks)
           (chez-async low-level handle-base)
           (chez-async low-level request-base)
-          (chez-async low-level buffer)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (only (chez-async internal buffer-utils) foreign->bytevector)
-          (chez-async internal utils))
+          (only (chez-async internal foreign) foreign->bytevector))
 
   ;; ========================================
   ;; 全局回调（使用统一注册表管理）

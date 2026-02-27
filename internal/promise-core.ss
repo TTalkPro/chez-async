@@ -2,12 +2,16 @@
 ;;;
 ;;; 本模块提供 Promise 的核心数据类型和操作，不依赖任何 low-level 或 high-level 模块。
 ;;;
+;;; 1. Promise 记录类型 —— 状态（pending/fulfilled/rejected）、值、回调列表
+;;; 2. 微任务调度器 —— 可注入的参数化调度策略
+;;; 3. 核心操作 —— fulfill/reject/then/catch
+;;;
 ;;; 设计目的：
-;;; 打破 internal/scheduler.ss -> high-level/promise.ss 的层级违规。
+;;; 打破 internal/scheduler.ss → high-level/promise.ss 的层级违规。
 ;;; scheduler 只需要 promise-then 等核心操作，不需要组合器。
 ;;;
 ;;; 微任务调度：
-;;; schedule-microtask 函数通过 *microtask-scheduler* 参数化，
+;;; schedule-microtask 函数通过 microtask-scheduler 参数化，
 ;;; 由 high-level 层在初始化时注入具体实现（基于 uv-timer）。
 ;;; 这样 internal 层不需要依赖 low-level 层。
 
@@ -30,7 +34,7 @@
     promise-record-loop-set!
 
     ;; 微任务调度器（可注入）
-    *microtask-scheduler*
+    microtask-scheduler
     schedule-microtask
     install-microtask-scheduler!
 
@@ -65,22 +69,32 @@
   ;;
   ;; 默认实现直接同步调用 thunk（fallback）。
   ;; high-level/promise.ss 会在加载时注入基于 uv-timer 的实现。
+  ;;
+  ;; 命名：使用 Chez Scheme 惯例的 make-parameter 名称（无 earmuffs）。
 
-  (define *microtask-scheduler*
+  (define microtask-scheduler
     (make-parameter
       (lambda (loop thunk)
-        ;; 默认: 直接调用（同步 fallback）
         (thunk))))
 
+  ;; schedule-microtask: 在下一个事件循环迭代中执行 thunk
+  ;;
+  ;; 参数：
+  ;;   loop  - 事件循环
+  ;;   thunk - 要执行的无参函数
+  ;;
+  ;; 说明：
+  ;;   具体行为取决于通过 install-microtask-scheduler! 注入的调度器实现。
+  ;;   默认同步执行（测试用），生产环境由 high-level 注入异步版本。
   (define (schedule-microtask loop thunk)
-    "在下一个事件循环迭代中执行 thunk
-     具体行为取决于注入的调度器实现"
-    ((*microtask-scheduler*) loop thunk))
+    ((microtask-scheduler) loop thunk))
 
+  ;; install-microtask-scheduler!: 注入微任务调度器实现
+  ;;
+  ;; 参数：
+  ;;   scheduler - (lambda (loop thunk) ...) 接受事件循环和 thunk
   (define (install-microtask-scheduler! scheduler)
-    "注入微任务调度器实现
-     scheduler: (lambda (loop thunk) ...) - 接受事件循环和 thunk"
-    (*microtask-scheduler* scheduler))
+    (microtask-scheduler scheduler))
 
   ;; ========================================
   ;; 核心操作
@@ -133,29 +147,23 @@
         on-rejected: 失败回调 (lambda (reason) ...)"
        (let* ([loop (promise-record-loop promise)]
               [new-promise (make-promise-record loop)])
-         (letrec
-           ([handle-fulfilled
-              (lambda (value)
-                (if on-fulfilled
-                    (guard (e [else (reject-promise! new-promise e)])
-                      (let ([result (on-fulfilled value)])
-                        (if (promise-record? result)
-                            (promise-then result
-                              (lambda (v) (fulfill-promise! new-promise v))
-                              (lambda (r) (reject-promise! new-promise r)))
-                            (fulfill-promise! new-promise result))))
-                    (fulfill-promise! new-promise value)))]
-            [handle-rejected
-              (lambda (reason)
-                (if on-rejected
-                    (guard (e [else (reject-promise! new-promise e)])
-                      (let ([result (on-rejected reason)])
-                        (if (promise-record? result)
-                            (promise-then result
-                              (lambda (v) (fulfill-promise! new-promise v))
-                              (lambda (r) (reject-promise! new-promise r)))
-                            (fulfill-promise! new-promise result))))
-                    (reject-promise! new-promise reason)))])
+         ;; 公共模式：调用 handler，链接返回的 promise 或直接 resolve/reject
+         (define (resolve-handler handler pass-through value)
+           (if handler
+               (guard (e [else (reject-promise! new-promise e)])
+                 (let ([result (handler value)])
+                   (if (promise-record? result)
+                       (promise-then result
+                         (lambda (v) (fulfill-promise! new-promise v))
+                         (lambda (r) (reject-promise! new-promise r)))
+                       (fulfill-promise! new-promise result))))
+               (pass-through new-promise value)))
+         (let ([handle-fulfilled
+                 (lambda (value)
+                   (resolve-handler on-fulfilled fulfill-promise! value))]
+               [handle-rejected
+                 (lambda (reason)
+                   (resolve-handler on-rejected reject-promise! reason))])
            (case (promise-record-state promise)
              [(fulfilled)
               (schedule-microtask loop

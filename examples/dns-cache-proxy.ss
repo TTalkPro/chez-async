@@ -30,8 +30,8 @@
 ;; 第 1 部分：配置
 ;; ========================================
 
-(define *listen-port*      15353)
-(define *upstream-dns*     "8.8.8.8")
+(define *listen-port*      53)
+(define *upstream-dns*     "219.148.204.66")
 (define *upstream-port*    53)
 (define *query-timeout-ms* 3000)
 (define *negative-ttl*     60)

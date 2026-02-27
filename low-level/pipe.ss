@@ -55,7 +55,7 @@
           (chez-async internal loop-registry)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (only (chez-async internal foreign-utils) c-string->string))
+          (only (chez-async internal foreign) c-string->string))
 
   ;; ========================================
   ;; 全局 Connect 回调（复用 TCP 的）

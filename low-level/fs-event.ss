@@ -36,8 +36,7 @@
           (chez-async low-level handle-base)
           (chez-async internal loop-registry)
           (chez-async internal macros)
-          (chez-async internal callback-registry)
-          (chez-async internal utils))
+          (chez-async internal callback-registry))
 
   ;; ========================================
   ;; FS Event 回调处理

@@ -58,7 +58,7 @@
           (chez-async ffi errors)
           (chez-async ffi core)
           (chez-async internal macros)
-          (chez-async internal utils)
+          (chez-async internal foreign)
           (chez-async internal loop-registry))
 
   ;; ========================================

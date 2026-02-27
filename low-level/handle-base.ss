@@ -53,7 +53,7 @@
           (chez-async ffi handles)
           (chez-async ffi callbacks)
           (chez-async internal loop-registry)
-          (chez-async internal utils)
+          (chez-async internal foreign)
           (chez-async internal callback-registry)
           (chez-async internal macros))
 
@@ -152,6 +152,16 @@
   ;; ========================================
   ;; 关闭回调处理
   ;; ========================================
+  ;;
+  ;; libuv 的关闭机制是两阶段的：
+  ;; 1. 调用 uv_close(handle, close_cb) 发起关闭
+  ;; 2. close_cb 在下一个事件循环迭代中被调用
+  ;;
+  ;; 在 close_cb 被调用之前，句柄内存不能释放，
+  ;; 否则 libuv 会访问已释放的内存。因此：
+  ;; - uv-handle-close! 仅设置 closed? 标志，不释放内存
+  ;; - 内存释放（cleanup-handle-wrapper!）在 close_cb 内完成
+  ;; - 用户的 close-callback 也在 close_cb 内调用
   ;;
   ;; 使用统一回调注册表管理关闭回调
   ;; 回调在首次使用时延迟创建

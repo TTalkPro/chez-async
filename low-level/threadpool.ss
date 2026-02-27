@@ -1,6 +1,21 @@
 ;;; low-level/threadpool.ss - Chez Scheme 线程池核心
 ;;;
-;;; 提供基于 Chez Scheme 线程的任务调度系统
+;;; 提供基于 Chez Scheme 原生线程的任务调度系统。
+;;;
+;;; 工作原理：
+;;; 1. 创建 N 个工作线程，每个线程从共享任务队列 (task-queue) 阻塞取任务
+;;; 2. 工作线程执行任务后，将结果放入结果队列 (result-queue)
+;;; 3. 通过 uv_async_t 句柄通知主线程有结果可处理
+;;; 4. 主线程的 async 回调从结果队列取出所有结果，调用用户回调
+;;;
+;;; 线程安全：
+;;; - task-queue/result-queue 使用 mutex + condition variable 保护
+;;; - 任务队列使用双列表 FIFO，push/pop 均为 O(1) amortized
+;;; - 关闭时 broadcast condition variable 唤醒所有阻塞的工作线程
+;;;
+;;; 与 libuv 的集成：
+;;; - 唯一的跨线程通信通道是 uv_async_t（线程安全的事件通知）
+;;; - 用户回调始终在主线程（事件循环线程）中执行
 
 (library (chez-async low-level threadpool)
   (export
