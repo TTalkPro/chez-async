@@ -1,18 +1,22 @@
 ;;; high-level/event-loop.ss - 事件循环封装
 ;;;
-;;; 提供友好的事件循环接口
+;;; 提供友好的事件循环接口，是所有 high-level 模块的基础依赖。
 ;;;
-;;; 设计说明：
-;;; 每个 event-loop 维护自己的注册表，避免使用全局变量：
-;;; - ptr-registry: C 指针 -> Scheme 包装器对象的映射
+;;; Per-loop 架构说明：
+;;; 每个 event-loop 维护自己的注册表，避免全局变量：
+;;; - ptr-registry: C 指针 → Scheme 包装器对象的映射（handle 查找）
+;;; - threadpool: 懒初始化的 per-loop 线程池（由 async-work.ss 管理）
+;;; - temp-buffers: 临时缓冲区存储（用于 I/O 操作）
 ;;;
-;;; 这种设计的优点：
+;;; 设计优点：
 ;;; 1. 无全局状态，多个 loop 互不影响
-;;; 2. 易于测试，可以创建独立的测试 loop
+;;; 2. 易于测试，可创建独立的测试 loop
 ;;; 3. 符合 libuv 的 per-loop 架构
 ;;;
-;;; 注意：uv-loop 记录类型和循环注册操作已提取到 internal/loop-registry.ss，
-;;; 以打破 low-level 模块对此模块的循环依赖。
+;;; Re-export 说明：
+;;; 本模块从 internal/loop-registry.ss 重新导出 uv-loop 记录类型和注册表操作，
+;;; 使上层模块无需直接依赖 internal 层。uv-loop 记录类型放在 internal 层是为了
+;;; 打破 low-level 模块对 high-level 的循环依赖。
 
 (library (chez-async high-level event-loop)
   (export

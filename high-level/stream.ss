@@ -1,17 +1,22 @@
 ;;; high-level/stream.ss - 高层 Stream 抽象
 ;;;
-;;; 提供 Promise 风格的 Stream 操作接口
+;;; 提供 Promise 风格的 Stream 操作接口，封装 low-level/stream 的回调式 API。
+;;;
+;;; Promise 包装的读写流程：
+;;; - stream-read: 启动 uv-read-start!，收到一次数据后立即 uv-read-stop!，
+;;;   返回 bytevector（成功）、#f（EOF）或 reject（错误）
+;;; - stream-write: 调用 uv-write!，完成回调中 resolve/reject
+;;; - stream-shutdown: 关闭写入端，等待挂起的写入完成
+;;; - stream-end: 关闭整个流句柄
+;;;
+;;; stream-reader 缓冲机制：
+;;; stream-reader 支持连续读取，内部维护一个缓冲列表（buffer 字段）。
+;;; 调用 stream-reader-read 时，优先从缓冲中取数据；缓冲为空时才启动
+;;; uv-read-start! 从 libuv 读取新数据。每次只读一条消息后即停止。
 ;;;
 ;;; 用法示例：
-;;;   ;; 读取数据
 ;;;   (promise-then (stream-read tcp-handle)
 ;;;     (lambda (data) (display data)))
-;;;
-;;;   ;; 写入数据
-;;;   (promise-then (stream-write tcp-handle "Hello")
-;;;     (lambda (_) (display "写入完成")))
-;;;
-;;;   ;; 管道连接
 ;;;   (stream-pipe source-stream dest-stream)
 
 (library (chez-async high-level stream)

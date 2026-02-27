@@ -1,8 +1,12 @@
 ;;; high-level/async-work.ss - 异步任务 API
 ;;;
-;;; 提供用户友好的后台任务接口
+;;; 提供用户友好的后台任务接口，将 CPU 密集型工作卸载到工作线程。
 ;;;
-;;; 线程池存储在 uv-loop 记录中（per-loop），避免全局变量
+;;; Per-loop 线程池懒初始化：
+;;; 线程池存储在 uv-loop 记录的 threadpool 字段中（per-loop，非全局）。
+;;; 首次调用 loop-threadpool 时才创建线程池（默认 4 个工作线程），
+;;; 避免不需要线程池的程序承担初始化开销。
+;;; 线程池使用 low-level/threadpool 的 Scheme 原生实现（mutex + condition）。
 
 (library (chez-async high-level async-work)
   (export
@@ -22,7 +26,7 @@
   ;; 线程池配置
   ;; ========================================
 
-  (define *default-threadpool-size* 4)
+  (define default-threadpool-size 4)
 
   ;; ========================================
   ;; 每个 loop 关联一个线程池（Per-loop）
@@ -34,7 +38,7 @@
   (define (loop-threadpool loop)
     "获取或创建 loop 的线程池（默认 4 个工作线程）"
     (or (uv-loop-threadpool loop)
-        (let ([pool (make-threadpool loop *default-threadpool-size*)])
+        (let ([pool (make-threadpool loop default-threadpool-size)])
           (threadpool-start! pool)
           (uv-loop-threadpool-set! loop pool)
           pool)))

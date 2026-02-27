@@ -2,29 +2,33 @@
 ;;;
 ;;; 提供 Promise 风格的异步编程接口，类似于 JavaScript Promise。
 ;;;
+;;; Promise 状态机：
+;;;   pending ──resolve──→ fulfilled（不可逆）
+;;;   pending ──reject───→ rejected （不可逆）
+;;; 状态一旦转为 fulfilled/rejected 就不可再变更。
+;;;
+;;; 架构分层：
+;;; - 核心实现（记录类型、promise-then、fulfill/reject）在 internal/promise-core.ss
+;;;   以打破 internal/scheduler.ss 的层级违规
+;;; - 本模块提供用户 API（make-promise、组合器、状态查询）
+;;; - 本模块在加载时注入基于 uv-timer 的微任务调度器到 promise-core
+;;;
+;;; 微任务调度器注入原理：
+;;; promise-core 的 schedule-microtask 是一个 parameter，默认为空操作。
+;;; 本模块加载时通过 install-microtask-scheduler! 注入一个基于 run-after
+;;; （0ms timer）的调度器，使 promise-then 回调在下一次事件循环迭代中异步执行。
+;;;
+;;; run-after 辅助函数：
+;;; 封装 timer init→start→close 三步模式为单次调用，
+;;; 供本模块微任务调度器和 async-combinators 的 sleep/timeout/delay 使用。
+;;;
 ;;; 基本用法：
-;;;   ;; 创建 Promise
 ;;;   (define p (make-promise
 ;;;               (lambda (resolve reject)
 ;;;                 (uv-timer-start! timer 1000 0
 ;;;                   (lambda (t) (resolve "done!"))))))
-;;;
-;;;   ;; 链式调用
-;;;   (promise-then p
-;;;     (lambda (value) (display value)))
-;;;
-;;;   ;; 错误处理
-;;;   (promise-catch p
-;;;     (lambda (error) (display error)))
-;;;
-;;; 状态：
-;;; - pending: 初始状态，等待结果
-;;; - fulfilled: 成功完成，有值
-;;; - rejected: 失败，有错误
-;;;
-;;; 注意：Promise 核心实现（记录类型、promise-then、fulfill/reject）
-;;; 已提取到 internal/promise-core.ss，以打破 internal/scheduler.ss 的层级违规。
-;;; 本模块在加载时注入基于 uv-timer 的微任务调度器。
+;;;   (promise-then p (lambda (value) (display value)))
+;;;   (promise-catch p (lambda (error) (display error)))
 
 (library (chez-async high-level promise)
   (export
@@ -53,6 +57,9 @@
 
     ;; 辅助
     promise-wait
+
+    ;; Timer 辅助
+    run-after
     )
   (import (chezscheme)
           (chez-async high-level event-loop)
@@ -285,6 +292,23 @@
                  (promise-record-reason promise)))))
 
   ;; ========================================
+  ;; Timer 辅助函数
+  ;; ========================================
+
+  (define (run-after loop ms thunk)
+    "延迟 ms 毫秒后在事件循环中执行 thunk（一次性 timer）
+     loop: 事件循环
+     ms: 延迟毫秒数（0 表示下一次事件循环迭代）
+     thunk: 无参数的回调函数
+     用途：封装 timer init→start→close 三步模式，
+     适用于微任务调度、sleep、timeout 等场景"
+    (let ([timer (uv-timer-init loop)])
+      (uv-timer-start! timer ms 0
+        (lambda (t)
+          (uv-handle-close! t)
+          (thunk)))))
+
+  ;; ========================================
   ;; 注入微任务调度器
   ;; ========================================
   ;;
@@ -292,12 +316,11 @@
   ;; 这在库加载时执行，确保 promise-core 的
   ;; schedule-microtask 使用真实的事件循环调度。
 
+  ;; 使用 run-after 注入微任务调度器：
+  ;; 0ms timer 确保 thunk 在下一次事件循环迭代中执行，
+  ;; 实现类似 JavaScript microtask 的异步调度语义。
   (install-microtask-scheduler!
     (lambda (loop thunk)
-      (let ([timer (uv-timer-init loop)])
-        (uv-timer-start! timer 0 0
-          (lambda (t)
-            (uv-handle-close! t)
-            (thunk))))))
+      (run-after loop 0 thunk)))
 
 ) ; end library

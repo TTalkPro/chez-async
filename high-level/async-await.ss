@@ -1,7 +1,18 @@
-;;; high-level/async-await.ss - async/await 语法糖（基于 call/cc）
+;;; high-level/async-await.ss - async/await 语法糖（基于 call/cc 协程）
 ;;;
 ;;; 提供类似 JavaScript/Python 的 async/await 语法，
 ;;; 使用 call/cc 实现真正的协程暂停和恢复。
+;;;
+;;; 实现原理：
+;;; - async 宏创建一个 Promise，并在其中 spawn 一个协程（spawn-coroutine!）
+;;; - await 宏调用 suspend-for-promise!，通过 call/cc 捕获当前 continuation，
+;;;   将协程挂起直到目标 Promise 被 resolve/reject
+;;; - 协程由 internal/scheduler.ss 的调度器管理，FIFO 队列调度
+;;;
+;;; 限制条件：
+;;; - await 只能在 async 块内使用（需要 current-coroutine 上下文）
+;;; - await 不能跨越 lambda 边界（continuation 作用域限制）
+;;; - 不支持在 dynamic-wind 的 before/after thunk 中使用 await
 ;;;
 ;;; 基本用法：
 ;;;   (define (fetch-data url)
@@ -9,12 +20,6 @@
 ;;;       (let* ([response (await (http-get url))]
 ;;;              [body (await (read-body response))])
 ;;;         body)))
-;;;
-;;; 特性：
-;;; - 同步风格的异步代码
-;;; - 自然的错误处理（使用 guard）
-;;; - 支持嵌套 await
-;;; - 与 Promise API 完全兼容
 
 (library (chez-async high-level async-await)
   (export
@@ -133,22 +138,16 @@
 
   (define (async-value value)
     "创建一个立即解决的异步值
-
      value: 要包装的值
-
-     返回: Promise
-
-     等价于 (async value)"
-    (async value))
+     返回: 已 fulfilled 的 Promise
+     直接创建 resolved promise，不创建协程，开销更低"
+    (promise-resolved value))
 
   (define (async-error error)
     "创建一个立即拒绝的异步值
-
      error: 错误值
-
-     返回: Promise
-
-     等价于 (async (raise error))"
-    (async (raise error)))
+     返回: 已 rejected 的 Promise
+     直接创建 rejected promise，不创建协程，开销更低"
+    (promise-rejected error))
 
 ) ; end library
