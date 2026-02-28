@@ -86,7 +86,21 @@
     "关闭事件循环并释放资源
      注意：如果有线程池，需要先调用 threadpool-shutdown! 手动关闭
      loop: 要关闭的事件循环"
-    (let ([ptr (uv-loop-ptr loop)])
+    (let ([ptr (uv-loop-ptr loop)]
+          [registry (uv-loop-ptr-registry loop)])
+      ;; 检查是否有残留 handle，输出警告到 stderr
+      (let ([remaining (hashtable-size registry)])
+        (when (> remaining 0)
+          (format (current-error-port)
+                  "Warning: uv-loop-close called with ~a handle(s) still registered.~%"
+                  remaining)
+          (let-values ([(keys vals) (hashtable-entries registry)])
+            (vector-for-each
+              (lambda (k v)
+                (format (current-error-port)
+                        "  Leaked handle: ptr=~a wrapper=~a~%"
+                        k v))
+              keys vals))))
       ;; 从全局注册表注销
       (unregister-loop! loop)
       (with-uv-check uv-loop-close

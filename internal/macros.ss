@@ -380,36 +380,43 @@
   ;; - TCP 连接
   ;;
   ;; 用法：
-  ;;   (with-uv-request (req req-type callback data size-fn)
+  ;;   (with-uv-request (req req-type callback data size-fn operation-name
+  ;;                     cleanup-fn)
   ;;     operation-expr ...)
   ;;
   ;; 参数：
-  ;;   req      - 请求变量名
+  ;;   req      - 请求变量名（宏内部使用 req-ptr, req-wrapper）
   ;;   req-type - 请求类型符号（如 'fs, 'getaddrinfo）
   ;;   callback - 用户回调函数
   ;;   data     - 附加数据（可以是 #f）
   ;;   size-fn  - 返回请求大小的函数
+  ;;   operation-name - 操作名称（用于错误报告）
+  ;;   cleanup-fn - 清理函数（如 cleanup-request-wrapper!）
   ;;
-  ;; 展开为：
-  ;;   (let* ([req-size (size-fn)]
-  ;;          [req-ptr (allocate-request req-size)]
-  ;;          [req-wrapper (make-uv-request-wrapper ...)])
-  ;;     (let ([result (begin operation-expr ...)])
-  ;;       (when (< result 0)
-  ;;         (cleanup-request-wrapper! req-wrapper)
-  ;;         (raise-uv-error result 'operation))))
+  ;; 注意：cleanup-fn 作为显式参数传入，因为 syntax-rules 卫生宏
+  ;; 在定义处解析标识符，而 cleanup-request-wrapper! 定义在
+  ;; low-level/request-base.ss 中，不在 internal 层的作用域内。
 
   (define-syntax with-uv-request
-    (syntax-rules ()
-      [(_ (req req-type callback data size-fn operation-name)
-          body ...)
-       (let* ([req-size (size-fn)]
-              [req-ptr (allocate-request req-size)]
-              [req-wrapper (make-uv-request-wrapper req-ptr req-type callback data)])
-         (let ([result (begin body ...)])
-           (when (< result 0)
-             (cleanup-request-wrapper! req-wrapper)
-             (raise-uv-error result 'operation-name))))]))
+    (lambda (x)
+      (syntax-case x ()
+        [(_ (req req-type callback data size-fn operation-name cleanup-fn)
+            body ...)
+         ;; Use datum->syntax to inject identifiers into the use-site scope:
+         ;; - req-ptr, req-wrapper: template bindings that body needs to reference
+         ;; - allocate-request, make-uv-request-wrapper: from low-level/request-base,
+         ;;   not importable here (internal layer can't depend on low-level)
+         (with-syntax ([req-ptr (datum->syntax #'req 'req-ptr)]
+                       [req-wrapper (datum->syntax #'req 'req-wrapper)]
+                       [mk-wrapper (datum->syntax #'req 'make-uv-request-wrapper)]
+                       [alloc-req (datum->syntax #'req 'allocate-request)])
+           #'(let* ([req-size (size-fn)]
+                    [req-ptr (alloc-req req-size)]
+                    [req-wrapper (mk-wrapper req-ptr req-type callback data)])
+               (let ([result (begin body ...)])
+                 (when (< result 0)
+                   (cleanup-fn req-wrapper)
+                   (raise-uv-error result 'operation-name)))))])))
 
   ;; ========================================
   ;; 同步操作宏

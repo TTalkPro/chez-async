@@ -283,14 +283,14 @@
      flags: 打开标志（O_RDONLY, O_WRONLY, O_RDWR, O_CREAT 等）
      mode: 创建文件时的权限（如 #o644）
      callback: (lambda (fd error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-open)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-open cleanup-request-wrapper!)
       (%ffi-uv-fs-open (uv-loop-ptr loop) req-ptr path flags mode (get-fs-callback))))
 
   (define (uv-fs-close loop fd callback)
     "异步关闭文件
      fd: 文件描述符
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-close)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-close cleanup-request-wrapper!)
       (%ffi-uv-fs-close (uv-loop-ptr loop) req-ptr fd (get-fs-callback))))
 
   (define uv-fs-read
@@ -393,13 +393,13 @@
   (define (uv-fs-unlink loop path callback)
     "异步删除文件
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-unlink)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-unlink cleanup-request-wrapper!)
       (%ffi-uv-fs-unlink (uv-loop-ptr loop) req-ptr path (get-fs-callback))))
 
   (define (uv-fs-rename loop path new-path callback)
     "异步重命名/移动文件
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-rename)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-rename cleanup-request-wrapper!)
       (%ffi-uv-fs-rename (uv-loop-ptr loop) req-ptr path new-path (get-fs-callback))))
 
   (define uv-fs-copyfile
@@ -410,7 +410,7 @@
        "异步复制文件
         flags: UV_FS_COPYFILE_EXCL 等
         callback: (lambda (result error) ...)"
-       (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-copyfile)
+       (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-copyfile cleanup-request-wrapper!)
          (%ffi-uv-fs-copyfile (uv-loop-ptr loop) req-ptr src dest flags (get-fs-callback)))]))
 
   ;; ========================================
@@ -420,19 +420,19 @@
   (define (uv-fs-stat loop path callback)
     "异步获取文件状态
      callback: (lambda (stat-result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-stat)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-stat cleanup-request-wrapper!)
       (%ffi-uv-fs-stat (uv-loop-ptr loop) req-ptr path (get-fs-stat-callback))))
 
   (define (uv-fs-fstat loop fd callback)
     "异步获取文件状态（通过文件描述符）
      callback: (lambda (stat-result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fstat)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fstat cleanup-request-wrapper!)
       (%ffi-uv-fs-fstat (uv-loop-ptr loop) req-ptr fd (get-fs-stat-callback))))
 
   (define (uv-fs-lstat loop path callback)
     "异步获取链接状态（不跟随符号链接）
      callback: (lambda (stat-result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-lstat)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-lstat cleanup-request-wrapper!)
       (%ffi-uv-fs-lstat (uv-loop-ptr loop) req-ptr path (get-fs-stat-callback))))
 
   ;; ========================================
@@ -447,20 +447,20 @@
        "异步创建目录
         mode: 目录权限（默认 #o755）
         callback: (lambda (result error) ...)"
-       (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-mkdir)
+       (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-mkdir cleanup-request-wrapper!)
          (%ffi-uv-fs-mkdir (uv-loop-ptr loop) req-ptr path mode (get-fs-callback)))]))
 
   (define (uv-fs-rmdir loop path callback)
     "异步删除目录（必须为空）
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-rmdir)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-rmdir cleanup-request-wrapper!)
       (%ffi-uv-fs-rmdir (uv-loop-ptr loop) req-ptr path (get-fs-callback))))
 
   (define (uv-fs-scandir loop path callback)
     "异步扫描目录
      callback: (lambda (dirents error) ...)
                dirents 是 dirent 记录列表"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-scandir)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-scandir cleanup-request-wrapper!)
       (%ffi-uv-fs-scandir (uv-loop-ptr loop) req-ptr path 0 (get-fs-scandir-callback))))
 
   ;; ========================================
@@ -470,7 +470,7 @@
   (define (uv-fs-readlink loop path callback)
     "异步读取符号链接目标
      callback: (lambda (target error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-readlink)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-readlink cleanup-request-wrapper!)
       (%ffi-uv-fs-readlink (uv-loop-ptr loop) req-ptr path (get-fs-readlink-callback))))
 
   (define uv-fs-symlink
@@ -483,13 +483,13 @@
         new-path: 链接路径
         flags: UV_FS_SYMLINK_DIR 等
         callback: (lambda (result error) ...)"
-       (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-symlink)
+       (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-symlink cleanup-request-wrapper!)
          (%ffi-uv-fs-symlink (uv-loop-ptr loop) req-ptr path new-path flags (get-fs-callback)))]))
 
   (define (uv-fs-link loop path new-path callback)
     "异步创建硬链接
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-link)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-link cleanup-request-wrapper!)
       (%ffi-uv-fs-link (uv-loop-ptr loop) req-ptr path new-path (get-fs-callback))))
 
   ;; ========================================
@@ -499,25 +499,25 @@
   (define (uv-fs-chmod loop path mode callback)
     "异步修改文件权限
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-chmod)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-chmod cleanup-request-wrapper!)
       (%ffi-uv-fs-chmod (uv-loop-ptr loop) req-ptr path mode (get-fs-callback))))
 
   (define (uv-fs-fchmod loop fd mode callback)
     "异步修改文件权限（通过文件描述符）
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fchmod)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fchmod cleanup-request-wrapper!)
       (%ffi-uv-fs-fchmod (uv-loop-ptr loop) req-ptr fd mode (get-fs-callback))))
 
   (define (uv-fs-chown loop path uid gid callback)
     "异步修改文件所有者
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-chown)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-chown cleanup-request-wrapper!)
       (%ffi-uv-fs-chown (uv-loop-ptr loop) req-ptr path uid gid (get-fs-callback))))
 
   (define (uv-fs-fchown loop fd uid gid callback)
     "异步修改文件所有者（通过文件描述符）
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fchown)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fchown cleanup-request-wrapper!)
       (%ffi-uv-fs-fchown (uv-loop-ptr loop) req-ptr fd uid gid (get-fs-callback))))
 
   ;; ========================================
@@ -527,19 +527,19 @@
   (define (uv-fs-ftruncate loop fd length callback)
     "异步截断文件
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-ftruncate)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-ftruncate cleanup-request-wrapper!)
       (%ffi-uv-fs-ftruncate (uv-loop-ptr loop) req-ptr fd length (get-fs-callback))))
 
   (define (uv-fs-fsync loop fd callback)
     "异步同步文件到磁盘
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fsync)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fsync cleanup-request-wrapper!)
       (%ffi-uv-fs-fsync (uv-loop-ptr loop) req-ptr fd (get-fs-callback))))
 
   (define (uv-fs-fdatasync loop fd callback)
     "异步同步文件数据到磁盘（不含元数据）
      callback: (lambda (result error) ...)"
-    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fdatasync)
+    (with-uv-request (req 'fs callback #f %ffi-uv-fs-req-size uv-fs-fdatasync cleanup-request-wrapper!)
       (%ffi-uv-fs-fdatasync (uv-loop-ptr loop) req-ptr fd (get-fs-callback))))
 
   ;; ========================================

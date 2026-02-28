@@ -162,15 +162,15 @@
                           ;; 捕获未处理的异常
                           (coroutine-state-set! coro 'failed)
                           (coroutine-result-set! coro ex)
-                          (format #t "[Coroutine ~a] Failed with error: ~a~%"
+                          (format (current-error-port) "[Coroutine ~a] Failed with error: ~a~%"
                                   (coroutine-id coro) ex)
                           (when (condition? ex)
-                            (format #t "  Message: ~a~%"
+                            (format (current-error-port) "  Message: ~a~%"
                                     (if (message-condition? ex)
                                         (condition-message ex)
                                         "No message"))
                             (when (irritants-condition? ex)
-                              (format #t "  Irritants: ~a~%"
+                              (format (current-error-port) "  Irritants: ~a~%"
                                       (condition-irritants ex))))])
                    (let ([result (thunk)])
                      (coroutine-state-set! coro 'completed)
@@ -206,36 +206,39 @@
              [sched (get-scheduler loop)])
 
         ;; 使用 call/cc 捕获 continuation
-        (call/cc
-          (lambda (k)
-            ;; 1. 保存 continuation
-            (coroutine-continuation-set! coro k)
-            (coroutine-state-set! coro 'suspended)
-            (coroutine-awaiting-promise-set! coro promise)
+        ;; 返回值可能是正常值，也可能是 (promise-error . reason) 标记
+        (let ([result
+               (call/cc
+                 (lambda (k)
+                   ;; 1. 保存 continuation
+                   (coroutine-continuation-set! coro k)
+                   (coroutine-state-set! coro 'suspended)
+                   (coroutine-awaiting-promise-set! coro promise)
 
-            ;; 2. 注册到 pending 表
-            (hashtable-set! (scheduler-state-pending sched) promise coro)
+                   ;; 2. 注册到 pending 表
+                   (hashtable-set! (scheduler-state-pending sched) promise coro)
 
-            ;; 3. 注册 Promise 回调
-            (promise-then promise
-              ;; 成功回调
-              (lambda (value)
-                (resume-coroutine! sched coro value #f))
-              ;; 错误回调 - 包装错误以便在恢复后抛出
-              (lambda (error)
-                ;; 创建一个包装器，标记这是一个错误
-                (let ([error-wrapper (cons 'promise-error error)])
-                  (resume-coroutine! sched coro error-wrapper #t))))
+                   ;; 3. 注册 Promise 回调
+                   (promise-then promise
+                     ;; 成功回调
+                     (lambda (value)
+                       (resume-coroutine! sched coro value #f))
+                     ;; 错误回调 - 包装错误以便在恢复后抛出
+                     (lambda (error)
+                       (let ([error-wrapper (cons 'promise-error error)])
+                         (resume-coroutine! sched coro error-wrapper #t))))
 
-            ;; 4. 跳回调度器（借鉴 chez-socket 的做法）
-            ;; 注意：不清除 current-coroutine，parameterize 会自动管理
-            (let ([scheduler-k (scheduler-state-scheduler-k sched)])
-              (if scheduler-k
-                  ;; 如果有保存的调度器 continuation，跳回调度器
-                  (scheduler-k (void))
-                  ;; 否则抛出错误
-                  (error 'suspend-for-promise!
-                         "No scheduler continuation available"))))))))
+                   ;; 4. 跳回调度器
+                   (let ([scheduler-k (scheduler-state-scheduler-k sched)])
+                     (if scheduler-k
+                         (scheduler-k (void))
+                         (error 'suspend-for-promise!
+                                "No scheduler continuation available")))))])
+          ;; 在用户代码的上下文中检查错误标记并 raise
+          ;; 这样 raise 发生在 suspend-for-promise! 调用点，用户的 guard 能捕获
+          (if (and (pair? result) (eq? (car result) 'promise-error))
+              (raise (cdr result))
+              result)))))
 
   ;; ========================================
   ;; 核心操作：resume-coroutine!
@@ -294,13 +297,10 @@
             (if is-first-run?
                 ;; 首次运行（thunk）
                 (k)
-                ;; 恢复
-                (let ([result (coroutine-result coro)])
-                  (if (and (pair? result) (eq? (car result) 'promise-error))
-                      ;; 这是一个 Promise 错误，抛出它
-                      (raise (cdr result))
-                      ;; 正常结果，传递它
-                      (k result))))
+                ;; 恢复：传递结果给 continuation（包括错误标记）
+                ;; 错误检测在 suspend-for-promise! 的 call/cc 返回处处理，
+                ;; 这样 raise 发生在用户代码的上下文中，用户的 guard 能捕获
+                (k (coroutine-result coro)))
             (error 'run-coroutine! "Invalid continuation" k)))))
 
   ;; ========================================
@@ -330,7 +330,7 @@
            (let ([coro (queue-dequeue! (scheduler-state-runnable sched))])
              (guard (ex
                      [else
-                      (format #t "[Scheduler] Error running coroutine ~a: ~a~%"
+                      (format (current-error-port) "[Scheduler] Error running coroutine ~a: ~a~%"
                               (coroutine-id coro) ex)
                       (coroutine-state-set! coro 'failed)
                       (coroutine-result-set! coro ex)])

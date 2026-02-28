@@ -64,6 +64,7 @@
   (import (chezscheme)
           (chez-async high-level event-loop)
           (chez-async low-level timer)
+          (chez-async low-level idle)
           (chez-async low-level handle-base)
           (chez-async internal promise-core))
 
@@ -309,18 +310,84 @@
           (thunk)))))
 
   ;; ========================================
-  ;; 注入微任务调度器
+  ;; 微任务调度器（基于 uv_idle_t）
   ;; ========================================
   ;;
-  ;; 使用 uv-timer 的 0ms 定时器实现微任务调度。
-  ;; 这在库加载时执行，确保 promise-core 的
-  ;; schedule-microtask 使用真实的事件循环调度。
+  ;; 使用 per-loop 的 uv_idle_t + 微任务队列替代 0ms timer。
+  ;; 优势：每次 promise 回调不再需要创建/销毁 timer handle，
+  ;; 而是共享一个 idle handle，在有微任务时 start，队列空时 stop。
+  ;;
+  ;; 使用 idle 而非 check 的原因：idle handle 活跃时强制 I/O poll
+  ;; timeout=0，确保事件循环不会阻塞等待 I/O。check handle 在 I/O
+  ;; 轮询后执行，如果没有其他 I/O 事件，poll 会无限阻塞。
 
-  ;; 使用 run-after 注入微任务调度器：
-  ;; 0ms timer 确保 thunk 在下一次事件循环迭代中执行，
-  ;; 实现类似 JavaScript microtask 的异步调度语义。
-  (install-microtask-scheduler!
-    (lambda (loop thunk)
-      (run-after loop 0 thunk)))
+  ;; Per-loop 微任务状态：loop → (idle-handle . microtask-queue)
+  ;; microtask-queue 是一个 pair: (front . rear) 用于 O(1) enqueue
+  (define microtask-state-table (make-eq-hashtable))
+
+  (define (get-or-create-microtask-state! loop)
+    "获取或创建 loop 的微任务状态"
+    (or (hashtable-ref microtask-state-table loop #f)
+        (let* ([idle (uv-idle-init loop)]
+               [queue (cons '() '())]  ; (front . rear)
+               [state (cons idle queue)])
+          ;; unref idle handle 使其不会阻止事件循环退出（当非活跃时）
+          (uv-handle-unref! idle)
+          (hashtable-set! microtask-state-table loop state)
+          state)))
+
+  (define (microtask-enqueue! queue thunk)
+    "将微任务加入队列尾部"
+    (let ([new-cell (list thunk)])
+      (if (null? (car queue))
+          (begin
+            (set-car! queue new-cell)
+            (set-cdr! queue new-cell))
+          (begin
+            (set-cdr! (cdr queue) new-cell)
+            (set-cdr! queue new-cell)))))
+
+  (define (microtask-dequeue! queue)
+    "从队列头部取出微任务"
+    (let ([front (car queue)])
+      (if (null? front)
+          #f
+          (let ([thunk (car front)])
+            (set-car! queue (cdr front))
+            (when (null? (cdr front))
+              (set-cdr! queue '()))
+            thunk))))
+
+  (define (microtask-queue-empty? queue)
+    "检查微任务队列是否为空"
+    (null? (car queue)))
+
+  (define (schedule-microtask-impl loop thunk)
+    "微任务调度器实现：enqueue 并确保 idle handle 已启动"
+    (let* ([state (get-or-create-microtask-state! loop)]
+           [idle (car state)]
+           [queue (cdr state)])
+      ;; 加入队列
+      (microtask-enqueue! queue thunk)
+      ;; 确保 idle handle 正在运行
+      (unless (uv-handle-active? idle)
+        ;; ref 使 idle handle 保持事件循环活跃
+        (uv-handle-ref! idle)
+        (uv-idle-start! idle
+          (lambda (idl)
+            ;; drain 整个队列
+            (let drain ()
+              (let ([task (microtask-dequeue! queue)])
+                (when task
+                  (task)
+                  (drain))))
+            ;; 队列已空，停止并关闭 idle handle，释放资源
+            (when (microtask-queue-empty? queue)
+              (uv-idle-stop! idl)
+              (uv-handle-close! idl)
+              (hashtable-delete! microtask-state-table loop)))))))
+
+  ;; 注入微任务调度器
+  (install-microtask-scheduler! schedule-microtask-impl)
 
 ) ; end library

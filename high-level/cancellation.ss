@@ -189,8 +189,8 @@
   (define token-cancelled? cancel-token-cancelled?)
   (define token-register! cancel-token-register!)
 
-  ;; 条件类型别名
-  (define &operation-cancelled &cancelled)
+  ;; 条件类型别名（使用 identifier-syntax 因为 &cancelled 是 syntax binding）
+  (define-syntax &operation-cancelled (identifier-syntax &cancelled))
   (define make-operation-cancelled-error make-cancelled-error)
   (define operation-cancelled? cancelled-error?)
 
