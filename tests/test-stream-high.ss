@@ -18,7 +18,8 @@
            [server (uv-tcp-init loop)]
            [client (uv-tcp-init loop)]
            [server-port 0]
-           [received #f])
+           [received #f]
+           [write-done #f])
       ;; 绑定服务器到随机端口
       (uv-tcp-bind server "127.0.0.1" 0)
       (let ([addr (uv-tcp-getsockname server)])
@@ -28,25 +29,37 @@
         (lambda (srv err)
           (unless err
             (let ([conn (uv-tcp-accept srv)])
-              ;; 读取数据
+              ;; 读取数据，收到后关闭服务器连接
               (uv-read-start! conn
                 (lambda (handle data-or-err)
                   (cond
                     [(bytevector? data-or-err)
                      (set! received data-or-err)
                      (uv-read-stop! handle)
-                     (uv-handle-close! handle)]
+                     (uv-handle-close! handle)
+                     (uv-handle-close! srv)]
                     [else
-                     (uv-handle-close! handle)])))))))
+                     (uv-handle-close! handle)
+                     (uv-handle-close! srv)])))))))
       ;; 客户端连接
       (uv-tcp-connect client "127.0.0.1" server-port
         (lambda (tcp err)
           (unless err
-            ;; 使用 Promise 写入
+            ;; 使用 Promise 写入，收到写入完成信号后再关闭
             (promise-then (stream-write client "Hello")
               (lambda (_)
-                (uv-handle-close! client)
-                (uv-handle-close! server))))))
+                (set! write-done #t)
+                ;; 写入完成后，开始读取以等待服务器响应
+                (uv-read-start! client
+                  (lambda (handle data-or-err)
+                    (cond
+                      [(bytevector? data-or-err)
+                       ;; 收到服务器响应，数据已确认被接收
+                       (uv-read-stop! handle)]
+                      [else
+                       (uv-read-stop! handle)])
+                    (uv-handle-close! handle)
+                    (uv-handle-close! server))))))))
       ;; 运行事件循环
       (uv-run loop 'default)
       ;; 验证

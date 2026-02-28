@@ -39,8 +39,8 @@ run_test() {
         return
     fi
 
-    # Check for test failure in output
-    if echo "$output" | grep -q "Failed: 0\|All tests passed"; then
+    # Check for test failure in output (use -E for extended regex)
+    if echo "$output" | grep -qE "Failed: 0|All tests passed"; then
         printf "PASS\n"
         PASSED=$((PASSED + 1))
     elif echo "$output" | grep -q "Failed:"; then
