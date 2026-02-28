@@ -261,7 +261,7 @@
 
   (define (read-dirents req-ptr)
     "从 scandir 请求中读取所有目录项"
-    (let ([dirent-ptr (foreign-alloc 16)])  ; uv_dirent_t 大小
+    (let ([dirent-ptr (foreign-alloc dirent-size)])
       (let loop ([entries '()])
         (let ([result (%ffi-uv-fs-scandir-next req-ptr dirent-ptr)])
           (if (< result 0)

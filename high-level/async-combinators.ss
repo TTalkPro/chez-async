@@ -18,6 +18,11 @@
 
 (library (chez-async high-level async-combinators)
   (export
+    ;; 超时错误类型
+    &timeout-error
+    make-timeout-error
+    timeout-error?
+
     ;; 并发组合器（promise-all/race/any 的别名）
     async-all
     async-race

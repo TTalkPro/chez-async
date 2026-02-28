@@ -332,7 +332,7 @@
                    (cleanup-request-wrapper! req-wrapper)
                    (foreign-free buf-ptr)
                    (foreign-free data-ptr)
-                   (raise-uv-error 'uv-udp-send result)))))))]))
+                   (raise-uv-error result 'uv-udp-send)))))))]))
 
   (define uv-udp-try-send
     (case-lambda

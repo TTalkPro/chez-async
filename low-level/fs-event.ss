@@ -110,7 +110,7 @@
           (foreign-free buffer)
           (foreign-free size-ptr)
           (when (< result 0)
-            (raise-uv-error 'uv-fs-event-getpath result))
+            (raise-uv-error result 'uv-fs-event-getpath))
           path))))
 
   ;; 辅助函数

@@ -80,6 +80,7 @@
     uv-stat-st-birthtim   ; 创建时间
 
     ;; uv_dirent_t 字段访问
+    dirent-size            ; 结构大小
     uv-dirent-name        ; 目录项名称
     uv-dirent-type        ; 目录项类型
 
@@ -247,6 +248,7 @@
   ;; ========================================
 
   ;; uv_dirent_t 结构（16 字节）
+  (define dirent-size 16)         ; 结构大小
   (define dirent-name-offset 0)   ; const char*
   (define dirent-type-offset 8)   ; uv_dirent_type_t (int)
 

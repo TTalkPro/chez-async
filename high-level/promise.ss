@@ -289,8 +289,7 @@
       ;; 返回结果或抛出错误
       (if (promise-fulfilled? promise)
           (promise-record-value promise)
-          (error 'promise-wait "Promise rejected"
-                 (promise-record-reason promise)))))
+          (raise (promise-record-reason promise)))))
 
   ;; ========================================
   ;; Timer 辅助函数
@@ -375,11 +374,15 @@
         (uv-handle-ref! idle)
         (uv-idle-start! idle
           (lambda (idl)
-            ;; drain 整个队列
+            ;; drain 整个队列，每个 task 独立 guard 隔离错误
             (let drain ()
               (let ([task (microtask-dequeue! queue)])
                 (when task
-                  (task)
+                  (guard (ex
+                          [else
+                           (format (current-error-port)
+                                   "[Microtask] Error: ~a~%" ex)])
+                    (task))
                   (drain))))
             ;; 队列已空，停止并关闭 idle handle，释放资源
             (when (microtask-queue-empty? queue)

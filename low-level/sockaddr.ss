@@ -79,7 +79,7 @@
         (if (< result 0)
             (begin
               (foreign-free addr-ptr)
-              (raise-uv-error 'make-sockaddr-in result))
+              (raise-uv-error result 'make-sockaddr-in))
             addr-ptr))))
 
   ;; 别名
@@ -121,7 +121,7 @@
         (if (< result 0)
             (begin
               (foreign-free addr-ptr)
-              (raise-uv-error 'make-sockaddr-in6 result))
+              (raise-uv-error result 'make-sockaddr-in6))
             addr-ptr))))
 
   (define (sockaddr-in6-port addr-ptr)

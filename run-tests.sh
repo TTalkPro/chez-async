@@ -60,7 +60,7 @@ echo "  chez-async Test Suite"
 echo "========================================"
 echo ""
 
-run_test "Timer"               tests/test-timer.ss
+run_test "Timer"               tests/test-timer.ss             30
 run_test "Promise"             tests/test-promise.ss
 run_test "Async Work"          tests/test-async.ss
 run_test "Coroutine"           tests/test-coroutine.ss
@@ -76,6 +76,8 @@ run_test "FS Watch"            tests/test-fs-watch.ss
 run_test "Stream (high-level)" tests/test-stream-high.ss
 run_test "TTY"                 tests/test-tty.ss
 run_test "File System"         tests/test-fs.ss
+run_test "Async Combinators"   tests/test-async-combinators.ss
+run_test "Cancellation"        tests/test-cancellation.ss
 run_test "Phase 3 Integration" tests/test-phase3-integration.ss "$TIMEOUT_LONG"
 
 TOTAL=$((PASSED + FAILED))

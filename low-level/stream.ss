@@ -221,7 +221,7 @@
             (cleanup-request-wrapper! req-wrapper)
             (foreign-free buf-ptr)
             (foreign-free data-ptr)
-            (raise-uv-error 'uv-write result))))))
+            (raise-uv-error result 'uv-write))))))
 
   (define (uv-try-write stream data)
     "尝试同步写入数据到 stream（非阻塞）
@@ -268,7 +268,7 @@
                                        (get-shutdown-callback))])
         (when (< result 0)
           (cleanup-request-wrapper! req-wrapper)
-          (raise-uv-error 'uv-shutdown result)))))
+          (raise-uv-error result 'uv-shutdown)))))
 
   ;; ========================================
   ;; Stream 服务器

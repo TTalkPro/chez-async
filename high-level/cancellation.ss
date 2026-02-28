@@ -30,6 +30,9 @@
     &cancelled
     make-cancelled-error
     cancelled-error?
+    &operation-cancelled
+    make-operation-cancelled-error
+    operation-cancelled?
 
     ;; 组合器（新名）
     async-cancellable
@@ -98,7 +101,7 @@
           (lambda (callback)
             (guard (ex
                     [else
-                     (format #t "[Cancellation] Error in callback: ~a~%" ex)])
+                     (format (current-error-port) "[Cancellation] Error in callback: ~a~%" ex)])
               (callback)))
           (cancel-token-callbacks token))
         ;; 清空回调列表

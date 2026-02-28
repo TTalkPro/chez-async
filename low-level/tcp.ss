@@ -182,7 +182,7 @@
             (free-sockaddr sockaddr)
             (when (< result 0)
               (cleanup-request-wrapper! req-wrapper)
-              (raise-uv-error 'uv-tcp-connect result)))))))
+              (raise-uv-error result 'uv-tcp-connect)))))))
 
   ;; ========================================
   ;; TCP 选项

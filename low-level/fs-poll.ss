@@ -97,7 +97,7 @@
           (foreign-free buffer)
           (foreign-free size-ptr)
           (when (< result 0)
-            (raise-uv-error 'uv-fs-poll-getpath result))
+            (raise-uv-error result 'uv-fs-poll-getpath))
           path))))
 
   ;; 辅助函数

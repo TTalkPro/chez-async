@@ -70,6 +70,11 @@
     async-catch
     async-finally
 
+    ;; 超时错误类型
+    &timeout-error
+    make-timeout-error
+    timeout-error?
+
     ;; ========================================
     ;; Stream
     ;; ========================================
@@ -105,6 +110,9 @@
     cancel-token-register!
     make-cancelled-error
     cancelled-error?
+    &operation-cancelled
+    make-operation-cancelled-error
+    operation-cancelled?
     async-cancellable
     link-tokens
     )

@@ -272,7 +272,7 @@
                ;; 保存错误码，在关闭后再抛出
                (let ([err result])
                  (uv-handle-close! wrapper)
-                 (raise-uv-error 'uv-spawn err)))
+                 (raise-uv-error err 'uv-spawn)))
              wrapper)))]))
 
   (define (uv-process-kill! process signum)

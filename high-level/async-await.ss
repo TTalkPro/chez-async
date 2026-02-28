@@ -122,15 +122,11 @@
       (run-scheduler loop)
       (promise-wait promise)))
 
-  (define (run-async-loop . args)
+  (define (run-async-loop)
     "运行事件循环，支持协程调度
 
-     args: 传递给 uv-run 的参数（可选）
-
-     这是 uv-run 的协程友好版本。"
-    (let ([loop (uv-default-loop)]
-          [mode (if (null? args) 'default (car args))])
-      (run-scheduler loop)))
+     这是 uv-run 的协程友好版本，运行直到所有协程完成。"
+    (run-scheduler (uv-default-loop)))
 
   ;; ========================================
   ;; 工具函数
