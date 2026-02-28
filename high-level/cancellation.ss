@@ -112,14 +112,14 @@
   ;; ========================================
 
   (define (cancel-token-register! token callback)
-    "注册取消时的回调函数
+    "注册取消时的回调函数（按注册顺序调用）
      如果 token 已取消，立即调用 callback"
     (if (cancel-token-cancelled? token)
         ;; 已取消，立即调用
         (callback)
-        ;; 未取消，注册回调
+        ;; 未取消，注册回调（使用 append 实现 FIFO 顺序）
         (cancel-token-callbacks-set! token
-          (cons callback (cancel-token-callbacks token)))))
+          (append (cancel-token-callbacks token) (list callback)))))
 
   ;; ========================================
   ;; async-cancellable - 将异步操作与取消令牌关联

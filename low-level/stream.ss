@@ -226,7 +226,7 @@
   (define (uv-try-write stream data)
     "尝试同步写入数据到 stream（非阻塞）
      返回：写入的字节数，或负数表示错误
-     注意：UV_EAGAIN 表示需要等待"
+     注意：UV_EAGAIN 表示需要等待，此时数据未被消费，调用者可以重试"
     (when (handle-closed? stream)
       (error 'uv-try-write "stream is closed"))
     (let* ([bv (if (string? data)
@@ -245,6 +245,9 @@
         (ftype-set! uv-buf-t (len) buf-fptr len))
       ;; 尝试写入
       (let ([result (%ffi-uv-try-write (handle-ptr stream) buf-ptr 1)])
+        ;; 只有在成功写入或真正出错时才释放缓冲区
+        ;; UV_EAGAIN 表示数据未被消费，调用者可能想保留缓冲区重试
+        ;; 但由于缓冲区是本地分配的，这里仍然释放它们
         (foreign-free data-ptr)
         (foreign-free buf-ptr)
         result)))

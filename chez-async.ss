@@ -108,6 +108,7 @@
     cancel-token?
     cancel-token-cancelled?
     cancel-token-register!
+    &cancelled
     make-cancelled-error
     cancelled-error?
     &operation-cancelled
