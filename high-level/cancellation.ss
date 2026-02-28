@@ -45,9 +45,6 @@
     cts-cancel!
     token-cancelled?
     token-register!
-    &operation-cancelled
-    make-operation-cancelled-error
-    operation-cancelled?
     async-with-cancellation
     linked-token-source)
 

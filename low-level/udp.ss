@@ -123,39 +123,10 @@
         (lambda (wrapper nread buf-ptr addr-ptr flags)
           (let ([recv-data (handle-data wrapper)])
             (when (and recv-data (pair? recv-data))
-              (let ([user-callback (car recv-data)]
-                    [alloc-ptr (cadr recv-data)])
-                ;; 释放 alloc 分配的内存
-                (when alloc-ptr
-                  (foreign-free alloc-ptr)
-                  (set-car! (cdr recv-data) #f))
-                ;; 调用用户回调
+              (free-recv-alloc! recv-data)
+              (let ([user-callback (car recv-data)])
                 (when user-callback
-                  (cond
-                    ;; 错误
-                    [(< nread 0)
-                     (if (= nread -4095)  ; UV_EOF
-                         (user-callback wrapper #f #f flags)  ; EOF
-                         (user-callback wrapper
-                                        (make-uv-error nread (%ffi-uv-err-name nread) 'udp-recv)
-                                        #f flags))]
-                    ;; 空数据报（nread = 0 且 addr != NULL 是有效的空数据报）
-                    [(and (= nread 0) (not (= addr-ptr 0)))
-                     (let ([sender-addr (parse-sender-address addr-ptr)])
-                       (user-callback wrapper (make-bytevector 0) sender-addr flags))]
-                    ;; nread = 0 且 addr = NULL 表示没有更多数据
-                    [(= nread 0)
-                     (user-callback wrapper #f #f flags)]
-                    ;; 正常接收数据
-                    [else
-                     (let* ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)]
-                            [base (ftype-ref uv-buf-t (base) buf-fptr)]
-                            [bv (foreign->bytevector base nread)]
-                            [sender-addr (if (= addr-ptr 0)
-                                             #f
-                                             (parse-sender-address addr-ptr))])
-                       (user-callback wrapper bv sender-addr flags))])))))))))
-
+                  (dispatch-udp-recv user-callback wrapper nread buf-ptr addr-ptr flags)))))))))
   ;; 复用 stream 模块的 alloc 回调
   (define-registered-callback get-alloc-callback CALLBACK-ALLOC
     (lambda ()
@@ -188,6 +159,44 @@
                (sockaddr-in6-port addr-ptr))]
         [else
          (cons "unknown" 0)])))
+
+  ;; 释放 recv-data 中的 alloc 缓冲区
+  (define (free-recv-alloc! recv-data)
+    (let ([alloc-ptr (cadr recv-data)])
+      (when alloc-ptr
+        (foreign-free alloc-ptr)
+        (set-car! (cdr recv-data) #f))))
+
+  ;; 从 uv_buf_t 指针提取 bytevector
+  (define (extract-buf-data buf-ptr nread)
+    (let* ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)]
+           [base (ftype-ref uv-buf-t (base) buf-fptr)])
+      (foreign->bytevector base nread)))
+
+  ;; 根据 nread/addr-ptr 分派 UDP 接收回调
+  (define (dispatch-udp-recv user-callback wrapper nread buf-ptr addr-ptr flags)
+    (cond
+      ;; 错误
+      [(< nread 0)
+       (if (= nread -4095)  ; UV_EOF
+           (user-callback wrapper #f #f flags)  ; EOF
+           (user-callback wrapper
+                          (make-uv-error nread (%ffi-uv-err-name nread) 'udp-recv)
+                          #f flags))]
+      ;; 空数据报（nread = 0 且 addr != NULL 是有效的空数据报）
+      [(and (= nread 0) (not (= addr-ptr 0)))
+       (user-callback wrapper (make-bytevector 0)
+                      (parse-sender-address addr-ptr) flags)]
+      ;; nread = 0 且 addr = NULL 表示没有更多数据
+      [(= nread 0)
+       (user-callback wrapper #f #f flags)]
+      ;; 正常接收数据
+      [else
+       (let ([bv (extract-buf-data buf-ptr nread)]
+             [sender-addr (if (= addr-ptr 0)
+                              #f
+                              (parse-sender-address addr-ptr))])
+         (user-callback wrapper bv sender-addr flags))]))
 
   ;; ========================================
   ;; UDP 创建
