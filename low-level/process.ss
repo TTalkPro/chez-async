@@ -92,9 +92,10 @@
       (make-exit-callback
         (lambda (wrapper exit-status term-signal)
           (let ([user-callback (handle-data wrapper)])
-            ;; 调用用户回调
-            (when (and user-callback (procedure? user-callback))
-              (user-callback wrapper exit-status term-signal))
+            ;; 用户回调抛异常也必须关闭句柄，否则 loop 永远无法退出
+            (guard (e [else (uv-handle-close! wrapper) (raise e)])
+              (when (and user-callback (procedure? user-callback))
+                (user-callback wrapper exit-status term-signal)))
             ;; 进程结束后自动关闭句柄
             (uv-handle-close! wrapper))))))
 
@@ -102,19 +103,17 @@
   ;; 进程选项构建
   ;; ========================================
   ;;
-  ;; uv_process_options_t 结构布局（64位系统）:
+  ;; uv_process_options_t 结构布局（64位系统，sizeof = 64）:
   ;; offset 0:  exit_cb (void*)
   ;; offset 8:  file (char*)
   ;; offset 16: args (char**)
   ;; offset 24: env (char**)
   ;; offset 32: cwd (char*)
   ;; offset 40: flags (unsigned int)
-  ;; offset 44: padding
-  ;; offset 48: stdio_count (int)
-  ;; offset 52: padding
-  ;; offset 56: stdio (uv_stdio_container_t*)
-  ;; offset 64: uid (uv_uid_t)
-  ;; offset 68: gid (uv_gid_t)
+  ;; offset 44: stdio_count (int)          — 紧跟 flags，无 padding
+  ;; offset 48: stdio (uv_stdio_container_t*)
+  ;; offset 56: uid (uv_uid_t, uint32)
+  ;; offset 60: gid (uv_gid_t, uint32)
 
   (define (strings->c-string-array strs)
     "将字符串列表转换为 C 字符串数组
@@ -181,10 +180,10 @@
       (foreign-set! 'void* opts-ptr 24 env-ptr)
       (foreign-set! 'void* opts-ptr 32 cwd-ptr)
       (foreign-set! 'unsigned-32 opts-ptr 40 flags)
-      (foreign-set! 'int opts-ptr 48 0)  ; stdio_count (默认 0)
-      (foreign-set! 'void* opts-ptr 56 0)  ; stdio (默认 NULL)
-      (foreign-set! 'unsigned-32 opts-ptr 64 uid)
-      (foreign-set! 'unsigned-32 opts-ptr 68 gid)
+      (foreign-set! 'int opts-ptr 44 0)  ; stdio_count (默认 0)
+      (foreign-set! 'void* opts-ptr 48 0)  ; stdio (默认 NULL)
+      (foreign-set! 'unsigned-32 opts-ptr 56 uid)
+      (foreign-set! 'unsigned-32 opts-ptr 60 gid)
       ;; 返回选项指针和需要释放的数据
       (list opts-ptr
             file-ptr

@@ -67,10 +67,9 @@
         (lambda (req-wrapper status)
           (let ([user-callback (uv-request-wrapper-scheme-callback req-wrapper)]
                 [pipe-handle (uv-request-wrapper-scheme-data req-wrapper)])
-            ;; 调用用户回调
-            (call-user-callback-with-error user-callback status pipe-connect pipe-handle %ffi-uv-err-name make-uv-error)
-            ;; 清理请求
-            (cleanup-request-wrapper! req-wrapper))))))
+            ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+            (cleanup-request-wrapper! req-wrapper)
+            (call-user-callback-with-error user-callback status pipe-connect pipe-handle %ffi-uv-err-name make-uv-error))))))
 
   ;; ========================================
   ;; Pipe 创建
