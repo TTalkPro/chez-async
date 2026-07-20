@@ -80,17 +80,19 @@
   ;;   Scheme 字符串，如果 ptr 为 #f 或 0 则返回 #f
   ;;
   ;; 说明：
-  ;;   逐字节读取直到遇到 NULL 终止符，假设 UTF-8 编码（ASCII 兼容）。
+  ;;   读取到 NULL 终止符为止，按 UTF-8 解码（与 string->c-string 的编码对称，
+  ;;   多字节字符如中文路径/文件名不会损坏）。
   ;;   注意：ffi/fs.ss 中有独立的同名定义，因为 ffi 层不能导入 internal 层。
   (define (c-string->string ptr)
     (if (or (not ptr) (= ptr 0))
         #f
-        (let loop ([i 0] [chars '()])
-          (let ([byte (foreign-ref 'unsigned-8 ptr i)])
-            (if (= byte 0)
-                (list->string (reverse chars))
-                (loop (+ i 1)
-                      (cons (integer->char byte) chars)))))))
+        (let ([len (let scan ([i 0])
+                     (if (= 0 (foreign-ref 'unsigned-8 ptr i)) i (scan (+ i 1))))])
+          (let ([bv (make-bytevector len)])
+            (do ([i 0 (+ i 1)])
+                ((= i len))
+              (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i)))
+            (utf8->string bv)))))
 
   ;; string->c-string: 将 Scheme 字符串转换为 C 字符串
   ;;
@@ -119,16 +121,17 @@
   ;;     (some-c-function ptr))
   ;;
   ;; 说明：
-  ;;   通过 dynamic-wind 确保 C 字符串在退出时释放，
-  ;;   即使发生异常或 continuation 跳出也能正确清理。
+  ;;   用 guard 而非 dynamic-wind：body 中可能经 call/cc 挂起协程（await），
+  ;;   dynamic-wind 会在挂起时提前释放、恢复后二次释放。
+  ;;   guard 保证正常返回与异常路径各释放一次；非本地跳出不释放（只泄漏不崩溃）。
   (define-syntax with-c-string
     (syntax-rules ()
       [(_ (var str) body ...)
        (let ([var (string->c-string str)])
-         (dynamic-wind
-           (lambda () #f)
-           (lambda () body ...)
-           (lambda () (foreign-free var))))]))
+         (guard (e [else (foreign-free var) (raise e)])
+           (let ([result (begin body ...)])
+             (foreign-free var)
+             result)))]))
 
   ;; ========================================
   ;; libc 加载
@@ -307,7 +310,8 @@
   (define (make-uv-buf data)
     (let* ([bv (if (string? data) (string->utf8 data) data)]
            [len (bytevector-length bv)]
-           [data-ptr (foreign-alloc len)]
+           ;; foreign-alloc 不接受 0；空数据也分配 1 字节，len 仍为 0
+           [data-ptr (foreign-alloc (max len 1))]
            [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))])
       (copy-bytevector-to-foreign! bv data-ptr)
       (let ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)])
@@ -331,15 +335,16 @@
   ;;     (some-operation buf-ptr))
   ;;
   ;; 说明：
-  ;;   通过 dynamic-wind 确保 buf-ptr 和 data-ptr 在退出时释放。
+  ;;   用 guard 而非 dynamic-wind：body 中可能经 call/cc 挂起协程（await），
+  ;;   dynamic-wind 会在挂起时提前释放（异步操作仍在使用缓冲区）、恢复后二次释放。
   (define-syntax with-uv-buf
     (syntax-rules ()
       [(_ (buf-ptr data-ptr len) data body ...)
        (let-values ([(buf-ptr data-ptr len) (make-uv-buf data)])
-         (dynamic-wind
-           (lambda () #f)
-           (lambda () body ...)
-           (lambda () (free-uv-buf buf-ptr data-ptr))))]))
+         (guard (e [else (free-uv-buf buf-ptr data-ptr) (raise e)])
+           (let ([result (begin body ...)])
+             (free-uv-buf buf-ptr data-ptr)
+             result)))]))
 
   ;; ========================================
   ;; uv_buf_t 操作（底层指针接口）

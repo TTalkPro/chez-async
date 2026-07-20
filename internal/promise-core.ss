@@ -105,13 +105,13 @@
     (when (eq? (promise-record-state promise) 'pending)
       (promise-record-state-set! promise 'fulfilled)
       (promise-record-value-set! promise value)
-      ;; 调度所有成功回调
+      ;; 调度所有成功回调（列表是头插构建的，reverse 恢复注册顺序）
       (let ([loop (promise-record-loop promise)])
         (for-each
           (lambda (callback)
             (schedule-microtask loop
               (lambda () (callback value))))
-          (promise-record-on-fulfilled promise)))
+          (reverse (promise-record-on-fulfilled promise))))
       ;; 清空回调列表
       (promise-record-on-fulfilled-set! promise '())
       (promise-record-on-rejected-set! promise '())))
@@ -121,13 +121,13 @@
     (when (eq? (promise-record-state promise) 'pending)
       (promise-record-state-set! promise 'rejected)
       (promise-record-reason-set! promise reason)
-      ;; 调度所有失败回调
+      ;; 调度所有失败回调（列表是头插构建的，reverse 恢复注册顺序）
       (let ([loop (promise-record-loop promise)])
         (for-each
           (lambda (callback)
             (schedule-microtask loop
               (lambda () (callback reason))))
-          (promise-record-on-rejected promise)))
+          (reverse (promise-record-on-rejected promise))))
       ;; 清空回调列表
       (promise-record-on-fulfilled-set! promise '())
       (promise-record-on-rejected-set! promise '())))

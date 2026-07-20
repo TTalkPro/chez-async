@@ -413,7 +413,10 @@
            #'(let* ([req-size (size-fn)]
                     [req-ptr (alloc-req req-size)]
                     [req-wrapper (mk-wrapper req-ptr req-type callback data)])
-               (let ([result (begin body ...)])
+               ;; body 抛异常时也要清理，否则 req 内存与 wrapper 中
+               ;; 被 lock 的对象（callback/data/wrapper 自身）永久泄漏
+               (let ([result (guard (e [else (cleanup-fn req-wrapper) (raise e)])
+                               (begin body ...))])
                  (when (< result 0)
                    (cleanup-fn req-wrapper)
                    (raise-uv-error result 'operation-name)))))])))

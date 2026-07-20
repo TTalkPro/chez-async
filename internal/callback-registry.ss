@@ -179,6 +179,9 @@
             (if instance
                 (foreign-callable-entry-point instance)
                 (let ([new-instance (factory)])
+                  ;; 入口点交给 C 之前必须锁定代码对象：
+                  ;; hashtable 引用只防回收，不防移动式 GC 搬移
+                  (lock-object new-instance)
                   (hashtable-set! registry callback-key
                                   (cons factory new-instance))
                   (foreign-callable-entry-point new-instance))))))

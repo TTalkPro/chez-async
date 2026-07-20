@@ -66,7 +66,7 @@
     (protocol
       (lambda (new)
         (lambda (ptr)
-          (lock-object ptr)
+          ;; ptr 是整数地址（foreign 内存），无需也不能 lock-object
           (new ptr
                (make-eqv-hashtable)  ; ptr-registry
                #f                     ; threadpool (initially none)
