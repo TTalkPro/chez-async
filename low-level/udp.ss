@@ -111,10 +111,9 @@
                     [data-ptr (cdr send-data)])
                 (when data-ptr (foreign-free data-ptr))
                 (when buf-ptr (foreign-free buf-ptr))))
-            ;; 调用用户回调
-            (call-user-callback-with-error user-callback status udp-send %ffi-uv-err-name make-uv-error)
-            ;; 清理请求
-            (cleanup-request-wrapper! req-wrapper))))))
+            ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+            (cleanup-request-wrapper! req-wrapper)
+            (call-user-callback-with-error user-callback status udp-send %ffi-uv-err-name make-uv-error))))))
 
   ;; UDP Recv 回调：处理接收，解析发送方地址
   (define-registered-callback get-udp-recv-callback CALLBACK-UDP-RECV
@@ -123,10 +122,18 @@
         (lambda (wrapper nread buf-ptr addr-ptr flags)
           (let ([recv-data (handle-data wrapper)])
             (when (and recv-data (pair? recv-data))
-              (free-recv-alloc! recv-data)
-              (let ([user-callback (car recv-data)])
-                (when user-callback
-                  (dispatch-udp-recv user-callback wrapper nread buf-ptr addr-ptr flags)))))))))
+              ;; buf->base 就是 alloc 缓冲区，必须先提取数据再释放
+              (if (> nread 0)
+                  (let ([bv (extract-buf-data buf-ptr nread)])
+                    (free-recv-alloc! recv-data)
+                    (let ([user-callback (car recv-data)])
+                      (when user-callback
+                        (dispatch-udp-recv-data user-callback wrapper bv addr-ptr flags))))
+                  (begin
+                    (free-recv-alloc! recv-data)
+                    (let ([user-callback (car recv-data)])
+                      (when user-callback
+                        (dispatch-udp-recv user-callback wrapper nread addr-ptr flags)))))))))))
   ;; 复用 stream 模块的 alloc 回调
   (define-registered-callback get-alloc-callback CALLBACK-ALLOC
     (lambda ()
@@ -173,8 +180,8 @@
            [base (ftype-ref uv-buf-t (base) buf-fptr)])
       (foreign->bytevector base nread)))
 
-  ;; 根据 nread/addr-ptr 分派 UDP 接收回调
-  (define (dispatch-udp-recv user-callback wrapper nread buf-ptr addr-ptr flags)
+  ;; 分派 nread <= 0 的 UDP 接收回调（错误 / 空数据报 / 无更多数据）
+  (define (dispatch-udp-recv user-callback wrapper nread addr-ptr flags)
     (cond
       ;; 错误
       [(< nread 0)
@@ -184,19 +191,19 @@
                           (make-uv-error nread (%ffi-uv-err-name nread) 'udp-recv)
                           #f flags))]
       ;; 空数据报（nread = 0 且 addr != NULL 是有效的空数据报）
-      [(and (= nread 0) (not (= addr-ptr 0)))
+      [(not (= addr-ptr 0))
        (user-callback wrapper (make-bytevector 0)
                       (parse-sender-address addr-ptr) flags)]
       ;; nread = 0 且 addr = NULL 表示没有更多数据
-      [(= nread 0)
-       (user-callback wrapper #f #f flags)]
-      ;; 正常接收数据
       [else
-       (let ([bv (extract-buf-data buf-ptr nread)]
-             [sender-addr (if (= addr-ptr 0)
-                              #f
-                              (parse-sender-address addr-ptr))])
-         (user-callback wrapper bv sender-addr flags))]))
+       (user-callback wrapper #f #f flags)]))
+
+  ;; 分派 nread > 0 的 UDP 接收回调（数据已提前从缓冲区拷贝）
+  (define (dispatch-udp-recv-data user-callback wrapper bv addr-ptr flags)
+    (let ([sender-addr (if (= addr-ptr 0)
+                           #f
+                           (parse-sender-address addr-ptr))])
+      (user-callback wrapper bv sender-addr flags)))
 
   ;; ========================================
   ;; UDP 创建
@@ -303,7 +310,7 @@
               [len (bytevector-length bv)]
               ;; 分配缓冲区结构和数据
               [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))]
-              [data-ptr (foreign-alloc len)]
+              [data-ptr (foreign-alloc (max len 1))]
               ;; 分配请求
               [req-size (%ffi-uv-udp-send-req-size)]
               [req-ptr (allocate-request req-size)])
@@ -334,14 +341,11 @@
                                                 1  ; nbufs
                                                 sockaddr
                                                 (get-udp-send-callback))])
-                 (when (not (= sockaddr 0))
-                   (free-sockaddr sockaddr))
+                 ;; 失败时只 raise，清理统一交给外层 guard，避免双重释放
                  (when (< result 0)
-                   ;; 发送失败，清理资源
-                   (cleanup-request-wrapper! req-wrapper)
-                   (foreign-free buf-ptr)
-                   (foreign-free data-ptr)
-                   (raise-uv-error result 'uv-udp-send)))))))]))
+                   (raise-uv-error result 'uv-udp-send))
+                 (when (not (= sockaddr 0))
+                   (free-sockaddr sockaddr)))))))]))
 
   (define uv-udp-try-send
     (case-lambda
@@ -359,7 +363,7 @@
                       data)]
               [len (bytevector-length bv)]
               [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))]
-              [data-ptr (foreign-alloc len)])
+              [data-ptr (foreign-alloc (max len 1))])
          ;; 复制数据
          (do ([i 0 (+ i 1)])
              ((= i len))
@@ -395,6 +399,9 @@
                sender-addr 为 (ip . port) 点对或 #f"
     (when (handle-closed? udp)
       (error 'uv-udp-recv-start! "udp handle is closed"))
+    ;; 释放旧的回调数据（重复调用时避免旧数据永久锁定）
+    (let ([old-data (handle-data udp)])
+      (when old-data (unlock-object old-data)))
     ;; 保存回调和 alloc 缓冲区指针
     (let ([recv-data (list callback #f)])  ; (user-callback alloc-ptr)
       (handle-data-set! udp recv-data)

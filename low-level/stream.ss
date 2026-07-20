@@ -86,21 +86,24 @@
             (when (and read-data (pair? read-data))
               (let ([user-callback (car read-data)]
                     [alloc-ptr (cadr read-data)])
-                ;; 释放 alloc 分配的内存
-                (when alloc-ptr
-                  (foreign-free alloc-ptr)
-                  (set-car! (cdr read-data) #f))
-                ;; 调用用户回调
-                (when user-callback
-                  (if (< nread 0)
-                      ;; 错误或 EOF
-                      (if (= nread -4095)  ; UV_EOF
-                          (user-callback wrapper #f)  ; EOF
-                          (user-callback wrapper (make-uv-error nread (%ffi-uv-err-name nread) 'read)))
-                      ;; 读取成功
-                      (let* ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)]
-                             [base (ftype-ref uv-buf-t (base) buf-fptr)]
-                             [bv (foreign->bytevector base nread)])
+                (if (< nread 0)
+                    ;; 错误或 EOF：缓冲区无数据，直接释放
+                    (begin
+                      (when alloc-ptr
+                        (foreign-free alloc-ptr)
+                        (set-car! (cdr read-data) #f))
+                      (when user-callback
+                        (if (= nread -4095)  ; UV_EOF
+                            (user-callback wrapper #f)  ; EOF
+                            (user-callback wrapper (make-uv-error nread (%ffi-uv-err-name nread) 'read)))))
+                    ;; 读取成功：buf->base 就是 alloc-ptr，必须先拷贝再释放
+                    (let* ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)]
+                           [base (ftype-ref uv-buf-t (base) buf-fptr)]
+                           [bv (foreign->bytevector base nread)])
+                      (when alloc-ptr
+                        (foreign-free alloc-ptr)
+                        (set-car! (cdr read-data) #f))
+                      (when user-callback
                         (user-callback wrapper bv)))))))))))
 
   ;; Write 回调：处理写入完成
@@ -116,10 +119,9 @@
                     [data-ptr (cdr write-data)])
                 (when data-ptr (foreign-free data-ptr))
                 (when buf-ptr (foreign-free buf-ptr))))
-            ;; 调用用户回调
-            (call-user-callback-with-error user-callback status write %ffi-uv-err-name make-uv-error)
-            ;; 清理请求
-            (cleanup-request-wrapper! req-wrapper))))))
+            ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+            (cleanup-request-wrapper! req-wrapper)
+            (call-user-callback-with-error user-callback status write %ffi-uv-err-name make-uv-error))))))
 
   ;; Shutdown 回调：处理流关闭完成
   (define-registered-callback get-shutdown-callback CALLBACK-SHUTDOWN
@@ -127,10 +129,9 @@
       (make-shutdown-callback
         (lambda (req-wrapper status)
           (let ([user-callback (uv-request-wrapper-scheme-callback req-wrapper)])
-            ;; 调用用户回调
-            (call-user-callback-with-error user-callback status shutdown %ffi-uv-err-name make-uv-error)
-            ;; 清理请求
-            (cleanup-request-wrapper! req-wrapper))))))
+            ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+            (cleanup-request-wrapper! req-wrapper)
+            (call-user-callback-with-error user-callback status shutdown %ffi-uv-err-name make-uv-error))))))
 
   ;; Connection 回调：处理新连接
   (define-registered-callback get-connection-callback CALLBACK-CONNECTION
@@ -194,7 +195,7 @@
            [len (bytevector-length bv)]
            ;; 分配缓冲区结构和数据
            [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))]
-           [data-ptr (foreign-alloc len)]
+           [data-ptr (foreign-alloc (max len 1))]
            ;; 分配请求
            [req-size (%ffi-uv-write-req-size)]
            [req-ptr (allocate-request req-size)])
@@ -234,7 +235,7 @@
                    data)]
            [len (bytevector-length bv)]
            [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))]
-           [data-ptr (foreign-alloc len)])
+           [data-ptr (foreign-alloc (max len 1))])
       ;; 复制数据
       (do ([i 0 (+ i 1)])
           ((= i len))

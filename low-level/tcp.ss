@@ -74,10 +74,9 @@
         (lambda (req-wrapper status)
           (let ([user-callback (uv-request-wrapper-scheme-callback req-wrapper)]
                 [tcp-handle (uv-request-wrapper-scheme-data req-wrapper)])
-            ;; 调用用户回调
-            (call-user-callback-with-error user-callback status connect tcp-handle %ffi-uv-err-name make-uv-error)
-            ;; 清理请求
-            (cleanup-request-wrapper! req-wrapper))))))
+            ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+            (cleanup-request-wrapper! req-wrapper)
+            (call-user-callback-with-error user-callback status connect tcp-handle %ffi-uv-err-name make-uv-error))))))
 
   ;; ========================================
   ;; TCP 创建
@@ -179,10 +178,11 @@
                                               (handle-ptr tcp)
                                               sockaddr
                                               (get-connect-callback))])
-            (free-sockaddr sockaddr)
+            ;; 失败时先清理请求再 raise；sockaddr 统一由外层 guard 释放，避免双重释放
             (when (< result 0)
               (cleanup-request-wrapper! req-wrapper)
-              (raise-uv-error result 'uv-tcp-connect)))))))
+              (raise-uv-error result 'uv-tcp-connect))
+            (free-sockaddr sockaddr))))))
 
   ;; ========================================
   ;; TCP 选项
