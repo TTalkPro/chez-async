@@ -114,11 +114,16 @@
       [(loop value)
        "创建一个已成功完成的 Promise
         loop: 事件循环（可选，默认为 uv-default-loop）
-        value: 成功值"
-       (let ([promise (make-promise-record loop)])
-         (promise-record-state-set! promise 'fulfilled)
-         (promise-record-value-set! promise value)
-         promise)]))
+        value: 成功值
+        若 value 本身是 Promise，则返回跟随它的新 Promise（采用其最终状态），
+        与 make-promise 的 resolve、以及 JS Promise.resolve 语义一致。"
+       (if (promise-record? value)
+           ;; 跟随内层 promise（make-promise 的 resolve 会做解包）
+           (make-promise loop (lambda (resolve reject) (resolve value)))
+           (let ([promise (make-promise-record loop)])
+             (promise-record-state-set! promise 'fulfilled)
+             (promise-record-value-set! promise value)
+             promise))]))
 
   (define promise-rejected
     (case-lambda
@@ -158,15 +163,24 @@
   ;; ========================================
 
   (define (promise-finally promise on-finally)
-    "添加完成回调（无论成功或失败）
-     on-finally 不接收参数，其返回值被忽略"
-    (promise-then promise
-      (lambda (value)
-        (on-finally)
-        value)
-      (lambda (reason)
-        (on-finally)
-        (promise-rejected (promise-record-loop promise) reason))))
+    "添加完成回调（无论成功或失败）。
+     on-finally 不接收参数。若其返回一个 Promise，会先等待该 Promise，
+     再传递原值/原因（与 JS finally 一致）；若该 Promise reject，则以该错误取代原结果。
+     on-finally 抛异常同样会取代原结果。"
+    (let ([loop (promise-record-loop promise)])
+      ;; 运行 on-finally；若其返回 promise 则等待后再执行 pass-through（产生最终结果）
+      (define (after-finally pass-through)
+        (let ([r (on-finally)])
+          (if (promise-record? r)
+              (promise-then r
+                (lambda (_) (pass-through))
+                (lambda (e) (promise-rejected loop e)))  ; finally 的 promise reject → 传播其错误
+              (pass-through))))
+      (promise-then promise
+        (lambda (value)
+          (after-finally (lambda () value)))
+        (lambda (reason)
+          (after-finally (lambda () (promise-rejected loop reason)))))))
 
   ;; ========================================
   ;; 组合器
@@ -304,7 +318,6 @@
      微任务待处理时 idle handle 处于 ref 状态、定时器/线程池 async 也都是 ref 的，
      故返回 0 意味着再没有任何东西能推进这个 promise。此时不再空转，直接报错。"
     (let ([loop (promise-record-loop promise)])
-      ;; 运行事件循环直到 promise 完成
       (let wait-loop ()
         (when (promise-pending? promise)
           (let ([active (uv-run loop 'once)])
