@@ -106,7 +106,7 @@
         (assert-equal 1 call-count "async-delay should call thunk once")
         (set! call-count 0)
         (promise-then delayed (lambda (v)
-          (assert-equal 42 v)
+          (assert-equal 42 v "async-delay should keep cached value")
           (uv-stop (uv-default-loop))))
         (uv-run (uv-default-loop) 'default)
         (assert-equal 0 call-count "async-delay should not call thunk again"))))

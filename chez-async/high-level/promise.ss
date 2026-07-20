@@ -59,6 +59,9 @@
     promise-wait
     promise-loop
 
+    ;; unhandled rejection 钩子（从 promise-core 重新导出）
+    unhandled-rejection-handler
+
     ;; Timer 辅助
     run-after
     run-after-cancellable
@@ -132,7 +135,12 @@
       [(loop reason)
        "创建一个已失败的 Promise
         loop: 事件循环（可选，默认为 uv-default-loop）
-        reason: 失败原因"
+        reason: 失败原因
+        注意：显式构造的 rejected 值豁免 unhandled rejection 检测
+        （它是「值」而非「事件」，且构造器不应有事件循环副作用——
+        经 reject-promise! 会调度检查微任务、创建 idle handle，
+        导致未运行过的 loop 无法 close）。动态 reject 路径
+        （make-promise 的 reject、async 块异常、then 链传播）均在检测范围内。"
        (let ([promise (make-promise-record loop)])
          (promise-record-state-set! promise 'rejected)
          (promise-record-reason-set! promise reason)
@@ -328,7 +336,11 @@
       ;; 返回结果或抛出错误
       (if (promise-fulfilled? promise)
           (promise-record-value promise)
-          (raise (promise-record-reason promise)))))
+          (begin
+            ;; promise-wait 消费了这次 rejection（re-raise 给调用者），
+            ;; 标记已处理，抑制 unhandled rejection 报告
+            (promise-record-rejection-handled?-set! promise #t)
+            (raise (promise-record-reason promise))))))
 
   ;; ========================================
   ;; Timer 辅助函数

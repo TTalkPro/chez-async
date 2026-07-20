@@ -32,11 +32,16 @@
     promise-record-on-rejected-set!
     promise-record-loop
     promise-record-loop-set!
+    promise-record-rejection-handled?
+    promise-record-rejection-handled?-set!
 
     ;; 微任务调度器（可注入）
     microtask-scheduler
     schedule-microtask
     install-microtask-scheduler!
+
+    ;; unhandled rejection 报告钩子（可配置）
+    unhandled-rejection-handler
 
     ;; 核心操作
     fulfill-promise!
@@ -57,11 +62,12 @@
       (mutable reason)          ; 失败时的原因
       (mutable on-fulfilled)    ; 成功回调列表
       (mutable on-rejected)     ; 失败回调列表
-      (mutable loop))           ; 关联的事件循环
+      (mutable loop)            ; 关联的事件循环
+      (mutable rejection-handled?)) ; 是否已有人负责此 promise 的 rejection
     (protocol
       (lambda (new)
         (lambda (loop)
-          (new 'pending #f #f '() '() loop)))))
+          (new 'pending #f #f '() '() loop #f)))))
 
   ;; ========================================
   ;; 微任务调度器（可注入）
@@ -97,6 +103,29 @@
     (microtask-scheduler scheduler))
 
   ;; ========================================
+  ;; unhandled rejection 报告
+  ;; ========================================
+  ;;
+  ;; 语义：promise 被 reject 时，若从未有人注册过 rejection 处理
+  ;; （promise-then/promise-catch/await/promise-wait 都算「负责」），
+  ;; 则调度一个微任务延迟一拍再检查——给同一轮同步代码挂 catch 的机会；
+  ;; 检查时仍无人负责，调用 unhandled-rejection-handler 报告。
+  ;; promise-then 总是会把 rejection 传播给派生 promise，因此父 promise
+  ;; 一旦被 then 过即视为 handled，「未处理」责任转移到链尾的派生 promise。
+  ;;
+  ;; 用户可 parameterize/set 此参数自定义处理（如收集、测试断言、直接抛出）。
+
+  (define unhandled-rejection-handler
+    (make-parameter
+      (lambda (promise reason)
+        (format (current-error-port)
+                "[Promise] Unhandled rejection: ~a~%"
+                (if (condition? reason)
+                    (call-with-string-output-port
+                      (lambda (p) (display-condition reason p)))
+                    reason)))))
+
+  ;; ========================================
   ;; 核心操作
   ;; ========================================
 
@@ -127,7 +156,14 @@
           (lambda (callback)
             (schedule-microtask loop
               (lambda () (callback reason))))
-          (reverse (promise-record-on-rejected promise))))
+          (reverse (promise-record-on-rejected promise)))
+        ;; unhandled rejection 检测：reject 时尚无人负责 → 延迟一拍复查
+        ;; （同一轮同步代码仍来得及挂 catch / 被 promise-wait 消费）
+        (unless (promise-record-rejection-handled? promise)
+          (schedule-microtask loop
+            (lambda ()
+              (unless (promise-record-rejection-handled? promise)
+                ((unhandled-rejection-handler) promise reason))))))
       ;; 清空回调列表
       (promise-record-on-fulfilled-set! promise '())
       (promise-record-on-rejected-set! promise '())))
@@ -158,6 +194,9 @@
                          (lambda (r) (reject-promise! new-promise r)))
                        (fulfill-promise! new-promise result))))
                (pass-through new-promise value)))
+         ;; then 总会把 rejection 传播给派生 promise（on-rejected 缺省时 pass-through），
+         ;; 因此本 promise 视为已被负责；「未处理」责任转移到派生 promise
+         (promise-record-rejection-handled?-set! promise #t)
          (let ([handle-fulfilled
                  (lambda (value)
                    (resolve-handler on-fulfilled fulfill-promise! value))]

@@ -3,6 +3,8 @@
 ;;;
 ;;; F2: promise-wait / 调度器在无活跃句柄却仍 pending 时报死锁，而非 100% CPU 空转
 ;;; H3: promise-resolved 跟随 promise 值；promise-finally 等待返回的 promise
+;;; F4: unhandled rejection 检测——动态 reject 无人处理时经钩子报告；
+;;;     同步挂 catch / promise-wait 消费则抑制
 
 (import (chezscheme)
         (chez-async tests framework)
@@ -73,6 +75,56 @@
       (assert-equal 'original result "finally should pass through the original value")
       (assert-equal '(finally-done value-seen) (reverse order)
                     "finally's promise must settle BEFORE the original value propagates")))
+
+  ;; ---- F4: 动态 reject 且无人处理 → 钩子被调用 ----
+  (test "unhandled-rejection-reported"
+    (let ([loop (uv-default-loop)]
+          [reported 'none])
+      (parameterize ([unhandled-rejection-handler
+                      (lambda (p reason) (set! reported reason))])
+        (make-promise loop (lambda (resolve reject) (reject 'boom)))
+        ;; 不挂任何 catch；跑一轮 loop 让检查微任务执行
+        (uv-run loop 'default))
+      (assert-equal 'boom reported
+                    "dynamically rejected promise with no handler should be reported")))
+
+  ;; ---- F4: 同一轮同步挂 catch → 不报告 ----
+  (test "unhandled-rejection-suppressed-by-sync-catch"
+    (let ([loop (uv-default-loop)]
+          [reported #f]
+          [caught 'none])
+      (parameterize ([unhandled-rejection-handler
+                      (lambda (p reason) (set! reported #t))])
+        (let ([p (make-promise loop (lambda (resolve reject) (reject 'expected)))])
+          ;; reject 之后、loop 运行之前同步挂 catch
+          (promise-catch p (lambda (e) (set! caught e))))
+        (uv-run loop 'default))
+      (assert-equal 'expected caught "catch should receive the reason")
+      (assert-false reported "sync catch must suppress the unhandled report")))
+
+  ;; ---- F4: async 块内抛异常且无人 catch → 报告（不再静默消失）----
+  (test "async-block-error-reported-when-uncaught"
+    (let ([loop (uv-default-loop)]
+          [reported 'none])
+      (parameterize ([unhandled-rejection-handler
+                      (lambda (p reason) (set! reported reason))])
+        (async (raise 'async-oops))   ; 丢弃返回的 promise，不挂 catch
+        (uv-run loop 'default))
+      (assert-equal 'async-oops reported
+                    "uncaught async-block error should surface via the hook")))
+
+  ;; ---- F4: promise-wait 消费 rejection → 不报告 ----
+  (test "unhandled-rejection-suppressed-by-promise-wait"
+    (let ([loop (uv-default-loop)]
+          [reported #f])
+      (parameterize ([unhandled-rejection-handler
+                      (lambda (p reason) (set! reported #t))])
+        (let ([p (make-promise loop
+                   (lambda (resolve reject)
+                     (run-after loop 10 (lambda () (reject 'wait-me)))))])
+          (guard (e [else #t]) (promise-wait p))   ; promise-wait re-raise，guard 吞掉
+          (uv-run loop 'default)))                 ; 再跑一轮确保检查微任务已执行
+      (assert-false reported "promise-wait consuming the rejection must suppress the report")))
 
   ;; ---- H3.2: on-finally 的 promise reject 时，以该错误取代原结果 ----
   (test "promise-finally-rejection-overrides"

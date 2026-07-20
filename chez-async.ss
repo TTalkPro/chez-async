@@ -45,6 +45,7 @@
     promise-rejected?
     promise-wait
     run-after
+    unhandled-rejection-handler
 
     ;; ========================================
     ;; async/await
