@@ -131,12 +131,21 @@
     "运行事件循环
      loop: 事件循环对象
      mode: 运行模式
-       - 'default: 运行直到没有活跃句柄
+       - 'default: 运行直到没有活跃句柄（若该 loop 用过协程，会一并驱动协程调度）
        - 'once: 运行一次，可能阻塞等待 I/O
        - 'nowait: 运行一次，不阻塞
-     返回: 如果还有活跃句柄返回非零值"
-    (let ([mode-int (uv-run-mode->int mode)])
-      (%ffi-uv-run (uv-loop-ptr loop) mode-int)))
+     返回: 如果还有活跃句柄返回非零值
+
+     调度器集成：'default 模式下，若该 loop 存在协程调度器（即用过 async/await），
+     委托给注入的驱动器（internal/scheduler 的 drive-loop），使 (async ...) 与
+     (uv-run loop 'default) 可直接混用。驱动器经 scheduler-driver 参数注入，
+     避免 event-loop 反向依赖 scheduler。纯 libuv 程序从不创建调度器、也从不加载
+     scheduler（driver 为 #f），此分支恒不触发，行为与原生 uv_run 完全一致。
+     'once/'nowait 属手动逐步控制，保持直通 FFI，不感知调度器。"
+    (let ([driver (scheduler-driver)])
+      (if (and (eq? mode 'default) driver (uv-loop-scheduler loop))
+          (begin (driver loop 'default) 0)
+          (%ffi-uv-run (uv-loop-ptr loop) (uv-run-mode->int mode)))))
 
   (define (uv-stop loop)
     "停止事件循环
