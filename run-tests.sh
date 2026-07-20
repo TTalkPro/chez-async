@@ -74,10 +74,12 @@ run_test "Process"             tests/test-process.ss
 run_test "Loop Hooks"          tests/test-loop-hooks.ss
 run_test "FS Watch"            tests/test-fs-watch.ss
 run_test "Stream (high-level)" tests/test-stream-high.ss
+run_test "Stream Reader/Pipe"  tests/test-stream-reader.ss
 run_test "TTY"                 tests/test-tty.ss
 run_test "File System"         tests/test-fs.ss
 run_test "Async Combinators"   tests/test-async-combinators.ss
 run_test "Cancellation"        tests/test-cancellation.ss
+run_test "Cancellation Redesign" tests/test-cancellation-redesign.ss
 run_test "Internal Foreign"    tests/test-internal-foreign.ss
 run_test "Scheduler Integ"     tests/test-scheduler-integration.ss
 run_test "Regression"          tests/test-regression.ss

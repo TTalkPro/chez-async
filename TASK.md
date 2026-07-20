@@ -112,17 +112,29 @@
       `internal/scheduler.ss` scheduler-loop（:341-344）、`internal/macros.ss`
       `define-sync-wrapper` —— pending 但 loop 无活跃 handle 时 `uv_run` 立即返回，
       100% CPU 死循环。需定策略：检测到该状态时报"死锁"错误还是阻塞等待。
-- [ ] F3. **cancellation 重新设计**（`high-level/cancellation.ss`）：
-      token 注册只增不删（长命 token 上每次 `async-cancellable` 追加闭包，无界泄漏），
-      `append` 注册 O(n²)；cancel 只 reject 包装 promise，底层 libuv 操作照跑。
-      需决策是否支持真正的操作取消（`uv_cancel`）。
+- [x] F3. **cancellation 重新设计**（`high-level/cancellation.ss`）—— 已完成：
+      - token callbacks 改用 id→callback 哈希表（O(1) 增删，替代 append 的 O(n²)）；
+        `cancel-token-register!` 返回注销器 thunk；取消时按 id 升序 FIFO 调用。
+      - `async-cancellable` 在被包装 promise settle 后调用注销器，从 token 移除取消回调
+        → 长命 token 不再无界累积；并改用 promise 所属 loop（修 M6，新增 `promise-loop` 访问器）。
+      - `link-tokens` 子取消时从所有父 token 注销 → 父不再永久持有子 source。
+      - 取消语义（只 reject 包装、不中止底层 libuv 操作，AbortController 式）在模块头写明；
+        真正的 `uv_cancel` 中止留作独立工作项（未做）。
+      新增 `tests/test-cancellation-redesign.ss`（7 例）。23/23 通过。
 - [ ] F4. **unhandled rejection 完全静默**（`internal/promise-core.ss` reject 无钩子/日志）。
       需定语义：何时判定"未处理"（GC 时？loop 退出时？），是否提供可配置钩子。
       与裸 `spawn-coroutine!` 失败会打印 stderr 的行为也不一致。
-- [ ] F5. **stream 高层基本需要重写**（`high-level/stream.ss`）：
-      stream-reader 注释描述的缓冲机制未实现（buffer/on-data/on-end/on-error 全是死字段）；
-      `reading?` 置位但从不检查，并发读会覆盖回调致第一个 promise 永不 settle；
-      stream-pipe 无背压，慢消费者内存无界增长。
+- [x] F5. **stream 高层重写**（`high-level/stream.ss`）—— 已完成：
+      - stream-reader 改为「单一持续读 + 缓冲队列 + 等待者队列」解复用模型：
+        多个并发 stream-reader-read 按 FIFO 依次拿到数据块（不再互相覆盖回调、
+        第一个 promise 不再永不 settle）；缓冲队列真正启用（替代旧死字段）。
+      - reader 背压：缓冲超过高水位（64 块）暂停底层读取，消费降到低水位（16 块）恢复。
+      - stream-pipe 背压：以在途写入字节数计量，超过 256KB 暂停读源、排空后恢复；
+        源 EOF 后等所有在途写入完成才 resolve；读/写错误 reject。
+      - stream-read 保持一次性语义，补文档提示并发/连续读用 stream-reader。
+      新增 `tests/test-stream-reader.ss`（3 例：连续读到 EOF、并发读 FIFO、
+      300KB 背压 pipe 完整性）。24/24 通过。
+      注：旧的 on-data/on-end/on-error 死字段已随重写移除（reader 记录类型换新字段集）。
 - [ ] F6. **可移植性：FFI 层仅 Linux x86-64 正确**。addrinfo 偏移硬编码 glibc 布局
       （`ffi/dns.ss:69-79`，macOS 上 ai_addr/ai_canonname 互换）；信号常量
       （`ffi/signal.ss`）与 UV_E* 错误码（`ffi/errors.ss`）是 Linux 值；
@@ -146,7 +158,8 @@
       引用未绑定 `uv-run`，全库无使用点）。
 - [x] H2. promise 组合器（all/race/any/all-settled）已加 `combinator-loop` 校验：
       非 promise 或跨 loop 输入时报清晰错误，不再静默取第一个 loop。
-      （注：组合器/取消固定用 `uv-default-loop` 的问题属 F 组多 loop 支持，未在此处理。）
+      （取消侧固定 `uv-default-loop` 已随 F3 修复为用 promise 所属 loop；
+      `async-combinators` 的 sleep/timeout/delay 仍固定 `uv-default-loop`，待多 loop 支持时处理。）
 - [ ] H3. 语义偏差（相对 JS Promise 基线）：`promise-resolved` 不解包 promise 值
       （与 `make-promise` 的 resolve 不一致，promise.ss:105-116）；
       `promise-finally` 的回调返回 promise 时不等待（promise.ss:155-164）。
