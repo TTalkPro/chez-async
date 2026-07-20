@@ -29,7 +29,8 @@
           (chez-async low-level handle-base)
           (chez-async internal loop-registry)
           (chez-async internal macros)
-          (chez-async internal callback-registry))
+          (chez-async internal callback-registry)
+          (only (chez-async internal foreign) c-string->string))
 
   ;; ========================================
   ;; FS Poll 回调处理
@@ -101,12 +102,7 @@
           path))))
 
   ;; 辅助函数
-  (define (get-string-from-c-ptr ptr)
-    "从 C 字符串指针获取 Scheme 字符串"
-    (let loop ([i 0] [chars '()])
-      (let ([byte (foreign-ref 'unsigned-8 ptr i)])
-        (if (= byte 0)
-            (list->string (reverse chars))
-            (loop (+ i 1) (cons (integer->char byte) chars))))))
+  ;; 复用 internal/foreign 的 UTF-8 解码实现
+  (define get-string-from-c-ptr c-string->string)
 
 ) ; end library

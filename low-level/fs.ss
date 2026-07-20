@@ -120,13 +120,13 @@
               (when wrapper
                 (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
                       [result (%ffi-uv-fs-req-result req-ptr)])
+                  ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+                  (%ffi-uv-fs-req-cleanup req-ptr)
+                  (cleanup-request-wrapper! wrapper)
                   (when user-callback
                     (if (< result 0)
                         (user-callback #f (make-uv-error result (%ffi-uv-err-name result) 'fs))
-                        (user-callback result #f)))
-                  ;; 清理请求
-                  (%ffi-uv-fs-req-cleanup req-ptr)
-                  (cleanup-request-wrapper! wrapper))))))
+                        (user-callback result #f))))))))
         (void*) void)))
 
   ;; stat 回调：处理文件状态查询
@@ -137,16 +137,19 @@
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
-                (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
-                      [result (%ffi-uv-fs-req-result req-ptr)])
+                (let* ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
+                       [result (%ffi-uv-fs-req-result req-ptr)]
+                       ;; statbuf 属于 req，必须在 uv_fs_req_cleanup 前转换
+                       [stat (if (< result 0)
+                                 #f
+                                 (statbuf->stat-result (%ffi-uv-fs-req-statbuf req-ptr)))])
+                  ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+                  (%ffi-uv-fs-req-cleanup req-ptr)
+                  (cleanup-request-wrapper! wrapper)
                   (when user-callback
                     (if (< result 0)
                         (user-callback #f (make-uv-error result (%ffi-uv-err-name result) 'fs-stat))
-                        (let ([statbuf (%ffi-uv-fs-req-statbuf req-ptr)])
-                          (user-callback (statbuf->stat-result statbuf) #f)))))
-                  ;; 清理请求
-                  (%ffi-uv-fs-req-cleanup req-ptr)
-                  (cleanup-request-wrapper! wrapper)))))
+                        (user-callback stat #f))))))))
         (void*) void)))
 
   ;; scandir 回调：处理目录扫描
@@ -157,16 +160,17 @@
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
-                (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
-                      [result (%ffi-uv-fs-req-result req-ptr)])
+                (let* ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
+                       [result (%ffi-uv-fs-req-result req-ptr)]
+                       ;; 目录项属于 req，必须在 uv_fs_req_cleanup 前读取
+                       [dirents (if (< result 0) #f (read-dirents req-ptr))])
+                  ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+                  (%ffi-uv-fs-req-cleanup req-ptr)
+                  (cleanup-request-wrapper! wrapper)
                   (when user-callback
                     (if (< result 0)
                         (user-callback #f (make-uv-error result (%ffi-uv-err-name result) 'fs-scandir))
-                        ;; 读取所有目录项
-                        (user-callback (read-dirents req-ptr) #f))))
-                  ;; 清理请求
-                  (%ffi-uv-fs-req-cleanup req-ptr)
-                  (cleanup-request-wrapper! wrapper)))))
+                        (user-callback dirents #f))))))))
         (void*) void)))
 
   ;; readlink 回调：处理符号链接读取
@@ -177,16 +181,19 @@
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
-                (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
-                      [result (%ffi-uv-fs-req-result req-ptr)])
+                (let* ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
+                       [result (%ffi-uv-fs-req-result req-ptr)]
+                       ;; 路径字符串属于 req，必须在 uv_fs_req_cleanup 前拷贝
+                       [path (if (< result 0)
+                                 #f
+                                 (c-string->string (%ffi-uv-fs-req-ptr req-ptr)))])
+                  ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+                  (%ffi-uv-fs-req-cleanup req-ptr)
+                  (cleanup-request-wrapper! wrapper)
                   (when user-callback
                     (if (< result 0)
                         (user-callback #f (make-uv-error result (%ffi-uv-err-name result) 'fs-readlink))
-                        (let ([ptr (%ffi-uv-fs-req-ptr req-ptr)])
-                          (user-callback (c-string->string ptr) #f)))))
-                  ;; 清理请求
-                  (%ffi-uv-fs-req-cleanup req-ptr)
-                  (cleanup-request-wrapper! wrapper)))))
+                        (user-callback path #f))))))))
         (void*) void)))
 
   ;; ========================================
