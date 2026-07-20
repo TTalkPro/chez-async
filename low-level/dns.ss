@@ -51,16 +51,19 @@
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
-                (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)])
+                (let* ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
+                       ;; 先把 addrinfo 转成 Scheme 数据，再统一释放资源，
+                       ;; 保证用户回调抛异常时不泄漏 addrinfo 链和请求
+                       [addrs (if (and (>= status 0) (not (= addrinfo-ptr 0)))
+                                  (addrinfo->list addrinfo-ptr)
+                                  '())])
+                  (when (not (= addrinfo-ptr 0))
+                    (%ffi-uv-freeaddrinfo addrinfo-ptr))
+                  (cleanup-request-wrapper! wrapper)
                   (when user-callback
                     (if (< status 0)
                         (user-callback #f (make-uv-error status (%ffi-uv-err-name status) 'getaddrinfo))
-                        (user-callback (addrinfo->list addrinfo-ptr) #f)))
-                  ;; 释放 addrinfo
-                  (when (and (>= status 0) (not (= addrinfo-ptr 0)))
-                    (%ffi-uv-freeaddrinfo addrinfo-ptr))
-                  ;; 清理请求
-                  (cleanup-request-wrapper! wrapper))))))
+                        (user-callback addrs #f))))))))
         (void* int void*) void)))
 
   ;; getnameinfo 回调：处理反向 DNS 解析完成
@@ -72,15 +75,16 @@
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
               (when wrapper
-                (let ([user-callback (uv-request-wrapper-scheme-callback wrapper)])
+                (let* ([user-callback (uv-request-wrapper-scheme-callback wrapper)]
+                       ;; 字符串属于 libuv 缓冲区，先拷贝再清理请求
+                       [hostname (if (= hostname-ptr 0) #f (c-string->string hostname-ptr))]
+                       [service (if (= service-ptr 0) #f (c-string->string service-ptr))])
+                  ;; 先清理请求再调用户回调：用户回调抛异常时不会泄漏请求资源
+                  (cleanup-request-wrapper! wrapper)
                   (when user-callback
                     (if (< status 0)
                         (user-callback #f #f (make-uv-error status (%ffi-uv-err-name status) 'getnameinfo))
-                        (let ([hostname (if (= hostname-ptr 0) #f (c-string->string hostname-ptr))]
-                              [service (if (= service-ptr 0) #f (c-string->string service-ptr))])
-                          (user-callback hostname service #f)))))
-                  ;; 清理请求
-                  (cleanup-request-wrapper! wrapper)))))
+                        (user-callback hostname service #f))))))))
         (void* int void* void*) void)))
 
   ;; ========================================

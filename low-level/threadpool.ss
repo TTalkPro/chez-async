@@ -185,6 +185,10 @@
             (when task
               ;; 从 map 中删除
               (hashtable-delete! (threadpool-task-map pool) (task-id task))
+              ;; 解锁 submit 时锁定的对象，避免每个完成任务永久泄漏
+              (unlock-object task)
+              (when (task-callback task) (unlock-object (task-callback task)))
+              (when (task-error-handler task) (unlock-object (task-error-handler task)))
               ;; 执行用户回调
               (guard (e [else
                          (fprintf (current-error-port)
