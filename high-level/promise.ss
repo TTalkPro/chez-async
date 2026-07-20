@@ -57,6 +57,7 @@
 
     ;; 辅助
     promise-wait
+    promise-loop
 
     ;; Timer 辅助
     run-after
@@ -74,6 +75,9 @@
   ;; ========================================
 
   (define promise? promise-record?)
+
+  ;; 获取 promise 关联的事件循环（供组合器/取消等按正确 loop 创建派生 promise）
+  (define promise-loop promise-record-loop)
 
   ;; ========================================
   ;; Promise 创建
