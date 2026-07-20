@@ -74,6 +74,19 @@
     &timeout-error
     make-timeout-error
     timeout-error?
+    timeout-error-timeout-ms
+
+    ;; ========================================
+    ;; UV 错误条件类型
+    ;; ========================================
+    ;; high-level 操作 reject 的正是这类 condition，
+    ;; 从统一入口导出判定器供用户按类型捕获
+    &uv-error
+    make-uv-error
+    uv-error?
+    uv-error-code
+    uv-error-name
+    uv-error-operation
 
     ;; ========================================
     ;; Stream
@@ -118,6 +131,9 @@
     link-tokens
     )
   (import
+    (only (chez-async ffi errors)
+          &uv-error make-uv-error uv-error?
+          uv-error-code uv-error-name uv-error-operation)
     (chez-async high-level event-loop)
     (chez-async high-level promise)
     (chez-async high-level async-await)

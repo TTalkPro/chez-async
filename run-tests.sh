@@ -2,7 +2,7 @@
 # run-tests.sh - Run all chez-async test files
 #
 # Uses the test framework tests (auto-detectable pass/fail).
-# Skips: test-framework.ss (library, not executable),
+# Skips: framework.ss (library, not executable),
 #        test-async-simple.ss / test-promise-resolved.ss (manual output, no framework)
 
 cd "$(dirname "$0")"
