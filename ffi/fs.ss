@@ -168,8 +168,9 @@
   ;; uv_stat_t 结构（基于 Linux x86_64）
   ;; ========================================
 
-  ;; uv_stat_t 大小：128 字节（基于 libuv）
-  (define uv-stat-size 128)
+  ;; uv_stat_t 大小：160 字节（12 个 uint64 + 4 个 uv_timespec_t，
+  ;; 与下方偏移表一致：st-birthtim-offset 144 + 16）
+  (define uv-stat-size 160)
 
   ;; 字段偏移量
   (define st-dev-offset 0)        ; uint64_t
@@ -265,13 +266,17 @@
 
   ;; C 字符串转换辅助函数
   (define (c-string->string ptr)
-    (if (= ptr 0)
+    ;; 与 internal/foreign.ss 的定义保持一致（UTF-8 解码、#f/0 → #f）；
+    ;; 因 ffi 层不能导入 internal 层而重复定义
+    (if (or (not ptr) (= ptr 0))
         #f
-        (let loop ([i 0] [chars '()])
-          (let ([byte (foreign-ref 'unsigned-8 ptr i)])
-            (if (= byte 0)
-                (list->string (reverse chars))
-                (loop (+ i 1) (cons (integer->char byte) chars)))))))
+        (let ([len (let scan ([i 0])
+                     (if (= 0 (foreign-ref 'unsigned-8 ptr i)) i (scan (+ i 1))))])
+          (let ([bv (make-bytevector len)])
+            (do ([i 0 (+ i 1)])
+                ((= i len))
+              (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i)))
+            (utf8->string bv)))))
 
   ;; ========================================
   ;; 文件系统 FFI

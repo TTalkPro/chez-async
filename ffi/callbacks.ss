@@ -207,6 +207,10 @@
      scheme-proc: 回调过程 (lambda (wrapper suggested-size buf-ptr) ...)"
     (foreign-callable
       (lambda (handle-ptr suggested-size buf-ptr)
+        ;; 先置空 buf：wrapper 查找失败或分配异常时 libuv 拿到
+        ;; base=NULL/len=0（按 UV_ENOBUFS 处理），而不是未初始化的栈垃圾
+        (foreign-set! 'void* buf-ptr 0 0)
+        (foreign-set! 'size_t buf-ptr (foreign-sizeof 'void*) 0)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)])
             (when wrapper (scheme-proc wrapper suggested-size buf-ptr)))))
@@ -330,13 +334,17 @@
   ;; ========================================
 
   (define (get-string-from-ptr ptr)
-    "从 C 字符串指针获取 Scheme 字符串
-     ptr: C 字符串指针（NULL 结尾）
-     返回: Scheme 字符串"
-    (let loop ([i 0] [chars '()])
-      (let ([byte (foreign-ref 'unsigned-8 ptr i)])
-        (if (= byte 0)
-            (list->string (reverse chars))
-            (loop (+ i 1) (cons (integer->char byte) chars))))))
+    "从 C 字符串指针获取 Scheme 字符串（UTF-8 解码）
+     ptr: C 字符串指针（NULL 结尾），#f/0 返回 #f
+     返回: Scheme 字符串或 #f"
+    (if (or (not ptr) (= ptr 0))
+        #f
+        (let ([len (let scan ([i 0])
+                     (if (= 0 (foreign-ref 'unsigned-8 ptr i)) i (scan (+ i 1))))])
+          (let ([bv (make-bytevector len)])
+            (do ([i 0 (+ i 1)])
+                ((= i len))
+              (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i)))
+            (utf8->string bv)))))
 
 ) ; end library

@@ -128,13 +128,11 @@
   ;; 实际大小可能因平台而异
 
   (define (%ffi-uv-process-options-size)
-    "获取 uv_process_options_t 结构大小（估算值）"
-    ;; 64 位系统上的近似大小
+    "获取 uv_process_options_t 结构大小（64 位布局）"
     ;; exit_cb(8) + file(8) + args(8) + env(8) + cwd(8) +
-    ;; flags(4) + padding(4) + stdio_count(4) + padding(4) +
-    ;; stdio(8) + uid(4) + gid(4) = 72 bytes
-    ;; 加上一些填充，使用 96 字节作为安全值
-    96)
+    ;; flags(4) + stdio_count(4) + stdio(8) + uid(4) + gid(4) = 64 bytes
+    ;; （flags 和 stdio_count 之间无 padding）
+    64)
 
   (define (%ffi-uv-stdio-container-size)
     "获取 uv_stdio_container_t 结构大小（估算值）"
