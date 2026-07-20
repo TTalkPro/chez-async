@@ -30,11 +30,12 @@
 
 (format #t "~n第一次调用: ~a~%" (save-continuation))
 
-;; 恢复 continuation
+;; 恢复 continuation（调用前清空，否则恢复后再次进入本分支造成死循环）
 (if saved-cont
-    (begin
+    (let ([k saved-cont])
+      (set! saved-cont #f)
       (format #t "恢复 continuation，传入 100~%")
-      (saved-cont 100))  ;; 从保存的 point 继续
+      (k 100))  ;; 从保存的 point 继续
     (void))
 
 ;; ========================================
@@ -55,9 +56,12 @@
 
 (yield-example)
 (format #t "  3. 主线程继续~%")
+;; 调用前清空 yield-point，否则恢复后再次进入本分支造成死循环
 (when yield-point
-  (format #t "  恢复 yield 点...~%")
-  (yield-point 'continue))
+  (let ([k yield-point])
+    (set! yield-point #f)
+    (format #t "  恢复 yield 点...~%")
+    (k 'continue)))
 
 ;; ========================================
 ;; 3. 简单的 async/await 模拟
@@ -119,7 +123,8 @@
   (protocol
     (lambda (new)
       (lambda (id)
-        (new id 'pending #f #f)))))
+        ;; 字段顺序: id continuation state result
+        (new id #f 'pending #f)))))
 
 ;; 任务调度器
 (define task-counter 0)
@@ -130,18 +135,16 @@
     (set! task-counter (+ task-counter 1))
     (set! tasks (cons task tasks))
     (format #t "[scheduler] 创建任务 #~a~%" (task-id task))
-    ;; 启动任务
+    ;; 启动任务（return 是任务的退出 continuation）
     (call/cc (lambda (return)
-               (task-continuation-set! task
-                 (call/cc (lambda (k)
-                            (task-state-set! task 'running)
-                            (let ([result (thunk)])
-                              (task-result-set! task result)
-                              (task-state-set! task 'completed)
-                              (format #t "[scheduler] 任务 #~a 完成，结果: ~a~%"
-                                      (task-id task) result)
-                              (return result))))))
-    task)))
+               (task-state-set! task 'running)
+               (let ([result (thunk)])
+                 (task-result-set! task result)
+                 (task-state-set! task 'completed)
+                 (format #t "[scheduler] 任务 #~a 完成，结果: ~a~%"
+                         (task-id task) result)
+                 (return result))))
+    task))
 
 ;; 暂停任务
 (define (task-await task)
@@ -149,8 +152,8 @@
              (task-continuation-set! task k)
              (task-state-set! task 'waiting)
              (format #t "[scheduler] 任务 #~a 暂停~%" (task-id task))
-             ;; 模拟被调度器恢复
-             (task-continuation task 'value)))))
+             ;; 模拟被调度器恢复（调用保存的 continuation）
+             ((task-continuation task) 'value))))
 
 ;; 示例：带暂停的任务
 (define (example-task)

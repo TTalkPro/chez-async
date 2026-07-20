@@ -2,7 +2,9 @@
 ;;; examples/timer-demo.ss - Timer 使用示例（展示简化 API）
 
 (import (chezscheme)
-        (chez-async))
+        (chez-async)
+        (chez-async low-level timer)
+        (chez-async low-level handle-base))
 
 (printf "=== chez-async: Timer Demo ===~n")
 (printf "libuv version: ~a~n~n" (uv-version-string))
@@ -12,7 +14,7 @@
 ;; ========================================
 
 (printf "=== Example 1: Single-shot timer ===~n")
-(let ([loop (uv-loop-init)]
+(let* ([loop (uv-loop-init)]
       [timer (uv-timer-init loop)])
   (printf "Timer created~n")
   (printf "  - Type: ~a~n" (handle-type timer))
@@ -33,7 +35,7 @@
 ;; ========================================
 
 (printf "=== Example 2: Repeating timer ===~n")
-(let ([loop (uv-loop-init)]
+(let* ([loop (uv-loop-init)]
       [timer (uv-timer-init loop)]
       [count 0])
   (printf "Starting repeating timer (every 500ms)...~n")
@@ -55,7 +57,7 @@
 ;; ========================================
 
 (printf "=== Example 3: Multiple timers ===~n")
-(let ([loop (uv-loop-init)]
+(let* ([loop (uv-loop-init)]
       [timer1 (uv-timer-init loop)]
       [timer2 (uv-timer-init loop)]
       [timer3 (uv-timer-init loop)])
@@ -82,7 +84,7 @@
 ;; ========================================
 
 (printf "=== Example 4: Simplified handle API ===~n")
-(let ([loop (uv-loop-init)]
+(let* ([loop (uv-loop-init)]
       [timer (uv-timer-init loop)])
 
   ;; 展示简化的访问器
@@ -93,8 +95,8 @@
 
   ;; 使用 handle-data 存储自定义数据
   (printf "~nStoring custom data...~n")
-  (define custom-data '(name "MyTimer" count 0))
-  (handle-data-set! timer custom-data)
+  (let ([custom-data '(name "MyTimer" count 0)])
+    (handle-data-set! timer custom-data))
   (printf "  - Stored: ~s~n" (handle-data timer))
 
   ;; 启动定时器
@@ -114,7 +116,7 @@
 ;; ========================================
 
 (printf "=== Example 5: Timer control (set-repeat, again) ===~n")
-(let ([loop (uv-loop-init)]
+(let* ([loop (uv-loop-init)]
       [timer (uv-timer-init loop)]
       [ticks 0])
 

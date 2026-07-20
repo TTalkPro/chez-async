@@ -33,7 +33,12 @@
              "saved")))
 
 (format #t "  第一次: ~a~%" (save-point))
-(format #t "  第二次: ~a~%" (if saved-cont (saved-cont 100) "none"))
+;; 调用前必须清空 saved-cont，否则恢复后再次进入本行造成死循环
+(format #t "  第二次: ~a~%" (if saved-cont
+                                (let ([k saved-cont])
+                                  (set! saved-cont #f)
+                                  (k 100))
+                                "none"))
 
 ;; ========================================
 ;; 3. 实现 await（简化版）
@@ -76,7 +81,8 @@
 ;; 创建任务
 (define task-counter 0)
 
-(define (make-ctask thunk)
+;; 注意：不能命名为 make-ctask，会与记录构造器重名
+(define (run-ctask! thunk)
   (let* ([tid task-counter]
          [task (make-ctask tid)])
     (set! task-counter (+ task-counter 1))
@@ -92,7 +98,7 @@
 (define (simple-task)
   (+ 1 2 3))
 
-(make-ctask simple-task)
+(run-ctask! simple-task)
 
 ;; ========================================
 ;; 5. Promise + call/cc
@@ -112,10 +118,10 @@
         (new 'pending #f '())))))
 
 (define (cpromise-resolve p v)
-  (ctask-state-set! p 'fulfilled)
-  (ctask-value-set! p v)
+  (cpromise-state-set! p 'fulfilled)
+  (cpromise-value-set! p v)
   (for-each (lambda (cb) (cb v))
-            (ctask-on-fulfilled p)))
+            (cpromise-on-fulfilled p)))
 
 (define (cpromise-then p cb)
   (if (eq? (cpromise-state p) 'fulfilled)
