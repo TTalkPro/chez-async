@@ -82,6 +82,7 @@ run_test "Cancellation"        tests/test-cancellation.ss
 run_test "Cancellation Redesign" tests/test-cancellation-redesign.ss
 run_test "Internal Foreign"    tests/test-internal-foreign.ss
 run_test "Scheduler Integ"     tests/test-scheduler-integration.ss
+run_test "Promise Semantics"   tests/test-promise-semantics.ss
 run_test "Regression"          tests/test-regression.ss
 run_test "Phase 3 Integration" tests/test-phase3-integration.ss "$TIMEOUT_LONG"
 
