@@ -78,6 +78,8 @@ run_test "TTY"                 tests/test-tty.ss
 run_test "File System"         tests/test-fs.ss
 run_test "Async Combinators"   tests/test-async-combinators.ss
 run_test "Cancellation"        tests/test-cancellation.ss
+run_test "Internal Foreign"    tests/test-internal-foreign.ss
+run_test "Regression"          tests/test-regression.ss
 run_test "Phase 3 Integration" tests/test-phase3-integration.ss "$TIMEOUT_LONG"
 
 TOTAL=$((PASSED + FAILED))
