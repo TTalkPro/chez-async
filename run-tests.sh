@@ -20,7 +20,7 @@ run_test() {
 
     printf "%-40s " "$name"
 
-    output=$(timeout "$timeout" scheme --libdirs .:.. --program "$file" 2>&1)
+    output=$(timeout "$timeout" scheme --libdirs . --program "$file" 2>&1)
     exit_code=$?
 
     if [ $exit_code -eq 124 ]; then
