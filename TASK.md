@@ -108,10 +108,15 @@
       初始化顺序坑。新增 `tests/test-scheduler-integration.ss`（6 例）。22/22 通过。
       注：协程逃逸仍严格在 Scheme 栈上（drive-loop 包裹 uv_run，不进 uv 回调），
       保持 C 边界安全。
-- [ ] F2. **忙等自旋**：`high-level/promise.ss` `promise-wait`（:285-288）、
-      `internal/scheduler.ss` scheduler-loop（:341-344）、`internal/macros.ss`
-      `define-sync-wrapper` —— pending 但 loop 无活跃 handle 时 `uv_run` 立即返回，
-      100% CPU 死循环。需定策略：检测到该状态时报"死锁"错误还是阻塞等待。
+- [x] F2. **忙等自旋** —— 已修复（死锁检测策略）。
+      关键洞察：微任务待处理时 idle handle 处于 ref 状态、定时器/线程池 async 也都 ref，
+      因此 `uv_run 'once` 返回 0（无活跃 ref 句柄）**即可断定**再无东西能推进 —— 不是模糊信号。
+      - `promise-wait`（`high-level/promise.ss`）：`uv_run 'once` 返回 0 且仍 pending → 报死锁。
+      - `drive-loop` Case 2（`internal/scheduler.ss`）：`uv_run` 返回 0 且无协程被唤醒进 runnable
+        且仍有 pending 协程 → 报死锁。
+      - `define-sync-wrapper` 那处已随 H1 删除。
+      新增 `tests/test-promise-semantics.ss` 覆盖（promise-wait 死锁、调度器协程死锁、
+      正常仍能 resolve）。25/25 通过。
 - [x] F3. **cancellation 重新设计**（`high-level/cancellation.ss`）—— 已完成：
       - token callbacks 改用 id→callback 哈希表（O(1) 增删，替代 append 的 O(n²)）；
         `cancel-token-register!` 返回注销器 thunk；取消时按 id 升序 FIFO 调用。
@@ -144,13 +149,29 @@
 
 ## G. 性能优化（不影响正确性，单独一轮）
 
-- [ ] G1. foreign 内存拷贝逐字节循环（`internal/foreign.ss:233-248, 105-113`；
-      stream/udp 写路径同样）→ 改 memcpy（foreign-procedure）。
+- [x] G1. foreign 内存拷贝改为 8 字节一组批量复制 —— 已完成。
+      `copy-bytevector-to-foreign!` / `copy-foreign-to-bytevector!`（`internal/foreign.ss`）
+      用 `unsigned-64` + `bytevector-u64-native-ref/set!` 每次搬 8 字节（原生字节序两端
+      一致、字节完全保真），尾部逐字节，约 8× 提速。`string->c-string` / `c-string->string`
+      及 stream/udp 写路径的逐字节循环统一改用这两个辅助。
+      （未用真 memcpy foreign-procedure：Chez 无稳定的「bytevector→地址」公有 API，
+      8 字节分块是用文档化原语实现的安全等效方案。）
+      新增边界长度测试（0/1/7/8/9/15/16/17/63/64/65/1003/4096 精确往返）。24/24 通过。
 - [ ] G2. 每次写分配两块 foreign 内存（uv_buf_t + data），可池化。
-- [ ] G3. 微任务 idle handle 每轮 drain 完销毁、下次重建（`high-level/promise.ss:387-391`）
-      → 改为 stop 保留（unref 状态）。
-- [ ] G4. 调度器 runnable 严格优先于 `uv_run`（`internal/scheduler.ss:327-344`），
-      互相唤醒的协程链可饿死 I/O → 每轮至少 poll 一次 nowait。
+      —— **推迟**：缓冲池的生命周期正确性（何时归还、跨异步操作的所有权）风险高，
+      收益需实测支撑，单独一轮谨慎处理。
+- [ ] G3. 微任务 idle handle 每轮 drain 完销毁、下次重建（`high-level/promise.ss`）。
+      —— **推迟**：与 `uv_loop_close` 生命周期纠缠。stop-但-不-close 的 idle handle 仍是
+      「未关闭句柄」，会让 `uv_loop_close` 返回 EBUSY；要复用须在 loop 关闭时先 close 该
+      handle 并再跑一次 uv_run 处理 close 回调，而 event-loop 不能 import promise（成环），
+      需再加一个注入钩子。当前「drain 完即 close」已把开销限制在每「批」一次（一次 drain
+      处理该批全部微任务），代价可控。留待需要时配合 loop-close 钩子一并做。
+- [ ] G4. 调度器 runnable 严格优先于 `uv_run`（`internal/scheduler.ss`）。
+      —— **推迟/基本非问题**：协程 resume 都经微任务 idle handle 在 `uv_run` 内触发
+      （`suspend-for-promise!` 的 promise-then → schedule-microtask），因此「互相唤醒」
+      本身就依赖 uv_run，runnable 会自然抽干后才进 Case 2。真正能持续占满 runnable 的
+      只有「协程在紧循环里不断 spawn 子协程」这类病态场景（对单线程而言本就饿死一切）。
+      插入 nowait poll 的收益边际、且引入时序微妙性，暂不做。
 
 ## H. 低优先级 / 小项
 
@@ -160,10 +181,12 @@
       非 promise 或跨 loop 输入时报清晰错误，不再静默取第一个 loop。
       （取消侧固定 `uv-default-loop` 已随 F3 修复为用 promise 所属 loop；
       `async-combinators` 的 sleep/timeout/delay 仍固定 `uv-default-loop`，待多 loop 支持时处理。）
-- [ ] H3. 语义偏差（相对 JS Promise 基线）：`promise-resolved` 不解包 promise 值
-      （与 `make-promise` 的 resolve 不一致，promise.ss:105-116）；
-      `promise-finally` 的回调返回 promise 时不等待（promise.ss:155-164）。
-      —— 属行为变更，留待确认是否要向 JS 语义对齐。
+- [x] H3. 语义向 JS Promise 对齐 —— 已完成（经用户确认的行为变更）：
+      - `promise-resolved`：value 为 promise 时跟随它（采用其最终状态），
+        与 `make-promise` 的 resolve、JS `Promise.resolve` 一致。
+      - `promise-finally`：on-finally 返回 promise 时先等待它再传递原值/原因；
+        该 promise reject 或 on-finally 抛异常则以该错误取代原结果（JS finally 语义）。
+      测试见 `tests/test-promise-semantics.ss`（H3.1 跟随/普通值、H3.2 等待/reject 覆盖）。
 - [ ] H4. `tests/scratch/` 12 个调试草稿不被运行，考虑删除或转正为测试。
 - [x] H5. `ffi/tcp.ss` 冗余的 `%ffi-uv-tcp-listen` 已删除（定义 + export；
       监听统一用 stream.ss 的 `%ffi-uv-listen`）。
