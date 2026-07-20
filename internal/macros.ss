@@ -41,9 +41,6 @@
 
     ;; 请求操作宏
     with-uv-request
-
-    ;; 同步操作宏
-    define-sync-wrapper
     )
   (import (chezscheme)
           (chez-async ffi errors)
@@ -420,46 +417,5 @@
                  (when (< result 0)
                    (cleanup-fn req-wrapper)
                    (raise-uv-error result 'operation-name)))))])))
-
-  ;; ========================================
-  ;; 同步操作宏
-  ;; ========================================
-  ;;
-  ;; define-sync-wrapper: 为异步操作生成同步版本
-  ;;
-  ;; 用法：
-  ;;   (define-sync-wrapper sync-name async-fn)
-  ;;
-  ;; 生成的同步函数会：
-  ;; 1. 调用异步函数
-  ;; 2. 运行事件循环直到操作完成
-  ;; 3. 返回结果或抛出错误
-  ;;
-  ;; 注意：这个宏假设异步函数的最后一个参数是回调函数
-
-  (define-syntax define-sync-wrapper
-    (syntax-rules ()
-      [(_ sync-name async-fn)
-       (define (sync-name loop . args)
-         (let ([result #f]
-               [error #f]
-               [done #f])
-           ;; 调用异步函数，添加回调
-           (apply async-fn
-                  (append (list loop)
-                          args
-                          (list (lambda (r e)
-                                  (set! result r)
-                                  (set! error e)
-                                  (set! done #t)))))
-           ;; 运行事件循环直到完成
-           (let loop-run ()
-             (unless done
-               (uv-run loop 'once)
-               (loop-run)))
-           ;; 返回结果或抛出错误
-           (if error
-               (raise error)
-               result)))]))
 
 ) ; end library

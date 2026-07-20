@@ -20,7 +20,7 @@
 
     ;; 服务器操作
     %ffi-uv-tcp-bind              ; 绑定地址
-    %ffi-uv-tcp-listen            ; 监听连接
+    ;; 监听用 stream.ss 的 %ffi-uv-listen（通用接口），此处不再重复绑定
 
     ;; 客户端操作
     %ffi-uv-tcp-connect           ; 连接服务器
@@ -70,10 +70,7 @@
   ;;   UV_TCP_IPV6ONLY (1) - 只允许 IPv6 连接
   (define-ffi %ffi-uv-tcp-bind "uv_tcp_bind" (void* void* unsigned-int) int)
 
-  ;; uv_listen is in stream.ss (通用接口)
-  ;; 这里提供一个别名
-  (define %ffi-uv-tcp-listen
-    (foreign-procedure "uv_listen" (void* int void*) int))
+  ;; uv_listen 由 stream.ss 的 %ffi-uv-listen 提供（通用接口），此处不再重复绑定
 
   ;; ========================================
   ;; TCP 客户端
