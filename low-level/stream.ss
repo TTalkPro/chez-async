@@ -53,7 +53,8 @@
           (chez-async low-level request-base)
           (chez-async internal macros)
           (chez-async internal callback-registry)
-          (only (chez-async internal foreign) foreign->bytevector))
+          (only (chez-async internal foreign)
+                foreign->bytevector copy-bytevector-to-foreign!))
 
   ;; ========================================
   ;; 全局回调（使用统一注册表管理）
@@ -200,9 +201,7 @@
            [req-size (%ffi-uv-write-req-size)]
            [req-ptr (allocate-request req-size)])
       ;; 复制数据到 C 内存
-      (do ([i 0 (+ i 1)])
-          ((= i len))
-        (foreign-set! 'unsigned-8 data-ptr i (bytevector-u8-ref bv i)))
+      (copy-bytevector-to-foreign! bv data-ptr)
       ;; 设置 uv_buf_t
       (let ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)])
         (ftype-set! uv-buf-t (base) buf-fptr data-ptr)
@@ -237,9 +236,7 @@
            [buf-ptr (foreign-alloc (ftype-sizeof uv-buf-t))]
            [data-ptr (foreign-alloc (max len 1))])
       ;; 复制数据
-      (do ([i 0 (+ i 1)])
-          ((= i len))
-        (foreign-set! 'unsigned-8 data-ptr i (bytevector-u8-ref bv i)))
+      (copy-bytevector-to-foreign! bv data-ptr)
       ;; 设置 uv_buf_t
       (let ([buf-fptr (make-ftype-pointer uv-buf-t buf-ptr)])
         (ftype-set! uv-buf-t (base) buf-fptr data-ptr)

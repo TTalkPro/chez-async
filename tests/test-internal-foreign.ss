@@ -98,6 +98,23 @@
       (assert-equal src dst "copy round-trip should be identical")
       (foreign-free ptr)))
 
+  ;; ---- 8 字节批量拷贝：覆盖各种长度（0/7/8/9 及跨边界大块）----
+  (test "copy-helpers-various-lengths"
+    (for-each
+      (lambda (len)
+        (let ([src (make-bytevector len)]
+              [ptr (foreign-alloc (max len 1))]
+              [dst (make-bytevector len 0)])
+          ;; 填充可区分的模式
+          (do ([i 0 (+ i 1)]) ((= i len))
+            (bytevector-u8-set! src i (modulo (* i 7) 256)))
+          (copy-bytevector-to-foreign! src ptr)
+          (copy-foreign-to-bytevector! ptr dst len)
+          (assert-equal src dst
+            (format "round-trip must be byte-exact at len=~a" len))
+          (foreign-free ptr)))
+      '(0 1 7 8 9 15 16 17 63 64 65 1003 4096)))
+
   )
 
 (run-tests)

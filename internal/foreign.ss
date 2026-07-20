@@ -89,9 +89,7 @@
         (let ([len (let scan ([i 0])
                      (if (= 0 (foreign-ref 'unsigned-8 ptr i)) i (scan (+ i 1))))])
           (let ([bv (make-bytevector len)])
-            (do ([i 0 (+ i 1)])
-                ((= i len))
-              (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i)))
+            (copy-foreign-to-bytevector! ptr bv len)   ; 8 字节一组批量复制
             (utf8->string bv)))))
 
   ;; string->c-string: 将 Scheme 字符串转换为 C 字符串
@@ -108,10 +106,8 @@
     (let* ([bv (string->utf8 str)]
            [len (bytevector-length bv)]
            [ptr (foreign-alloc (+ len 1))])
-      (do ([i 0 (+ i 1)])
-          ((= i len))
-        (foreign-set! 'unsigned-8 ptr i (bytevector-u8-ref bv i)))
-      (foreign-set! 'unsigned-8 ptr len 0)
+      (copy-bytevector-to-foreign! bv ptr)   ; 8 字节一组批量复制
+      (foreign-set! 'unsigned-8 ptr len 0)   ; NULL 终止符
       ptr))
 
   ;; with-c-string: 在临时 C 字符串上执行操作
@@ -228,27 +224,45 @@
   ;; 字节向量与外部内存转换
   ;; ========================================
 
-  ;; copy-bytevector-to-foreign!: 将字节向量内容逐字节复制到外部内存
+  ;; copy-bytevector-to-foreign!: 将字节向量内容复制到外部内存
   ;;
   ;; 参数：
   ;;   bv  - 源 Scheme bytevector
   ;;   ptr - 目标外部内存指针（必须已分配足够空间）
+  ;;
+  ;; 实现：以 8 字节一组批量复制（原生字节序两端一致，字节完全保真），
+  ;; 剩余不足 8 字节的尾部逐字节复制。相比纯逐字节循环约 8× 提速。
+  ;; foreign-alloc 返回的指针满足 8 字节对齐，i 为 8 的倍数，故 unsigned-64 访问对齐。
   (define (copy-bytevector-to-foreign! bv ptr)
-    (let ([len (bytevector-length bv)])
-      (do ([i 0 (+ i 1)])
-          ((= i len))
-        (foreign-set! 'unsigned-8 ptr i (bytevector-u8-ref bv i)))))
+    (let* ([len (bytevector-length bv)]
+           [n8 (fxand len (fxnot 7))])   ; len 向下取整到 8 的倍数
+      (let loop ([i 0])
+        (when (fx< i n8)
+          (foreign-set! 'unsigned-64 ptr i (bytevector-u64-native-ref bv i))
+          (loop (fx+ i 8))))
+      (let loop ([i n8])
+        (when (fx< i len)
+          (foreign-set! 'unsigned-8 ptr i (bytevector-u8-ref bv i))
+          (loop (fx+ i 1))))))
 
-  ;; copy-foreign-to-bytevector!: 将外部内存内容逐字节复制到字节向量
+  ;; copy-foreign-to-bytevector!: 将外部内存内容复制到字节向量
   ;;
   ;; 参数：
   ;;   ptr - 源外部内存指针
   ;;   bv  - 目标 Scheme bytevector（必须已分配足够空间）
   ;;   len - 要复制的字节数
+  ;;
+  ;; 实现：同上，8 字节一组批量复制 + 尾部逐字节。
   (define (copy-foreign-to-bytevector! ptr bv len)
-    (do ([i 0 (+ i 1)])
-        ((= i len))
-      (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i))))
+    (let ([n8 (fxand len (fxnot 7))])
+      (let loop ([i 0])
+        (when (fx< i n8)
+          (bytevector-u64-native-set! bv i (foreign-ref 'unsigned-64 ptr i))
+          (loop (fx+ i 8))))
+      (let loop ([i n8])
+        (when (fx< i len)
+          (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 ptr i))
+          (loop (fx+ i 1))))))
 
   ;; bytevector->foreign: 将字节向量复制到新分配的外部内存
   ;;
