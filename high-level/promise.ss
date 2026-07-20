@@ -60,6 +60,7 @@
 
     ;; Timer 辅助
     run-after
+    run-after-cancellable
     )
   (import (chezscheme)
           (chez-async high-level event-loop)
@@ -307,6 +308,25 @@
         (lambda (t)
           (uv-handle-close! t)
           (thunk)))))
+
+  (define (run-after-cancellable loop ms thunk)
+    "同 run-after，但返回一个取消函数。
+     调用取消函数会关闭 timer 且 thunk 不再执行；
+     timer 已触发或已取消时再调用为无操作。
+     用途：async-timeout 在操作先完成时释放超时 timer，
+     避免空 timer 把事件循环拖住整个超时时长"
+    (let ([timer (uv-timer-init loop)]
+          [done #f])
+      (uv-timer-start! timer ms 0
+        (lambda (t)
+          (set! done #t)
+          (uv-handle-close! t)
+          (thunk)))
+      (lambda ()
+        (unless done
+          (set! done #t)
+          ;; close 同时停止 timer，无需单独 stop
+          (uv-handle-close! timer)))))
 
   ;; ========================================
   ;; 微任务调度器（基于 uv_idle_t）

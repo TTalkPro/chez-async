@@ -87,8 +87,7 @@
      注意：如果有线程池，需要先调用 threadpool-shutdown! 手动关闭
      loop: 要关闭的事件循环"
     (let ([ptr (uv-loop-ptr loop)]
-          [registry (uv-loop-ptr-registry loop)]
-          [closed? #f])
+          [registry (uv-loop-ptr-registry loop)])
       ;; 检查是否有残留 handle，输出警告到 stderr
       (let ([remaining (hashtable-size registry)])
         (when (> remaining 0)
@@ -102,23 +101,14 @@
                         "  Leaked handle: ptr=~a wrapper=~a~%"
                         k v))
               keys vals))))
-      ;; 使用 dynamic-wind 确保异常情况下也能清理资源
-      (dynamic-wind
-        (lambda ()
-          (when closed?
-            (error 'uv-loop-close "handle is already closed")))
-        (lambda ()
-          ;; 从全局注册表注销
-          (unregister-loop! loop)
-          (with-uv-check uv-loop-close
-            (%ffi-uv-loop-close ptr))
-          (set! closed? #t))
-        (lambda ()
-          ;; 清理：即使发生异常也要执行
-          (unless closed?
-            (set! closed? #t)
-            (unlock-object ptr)
-            (safe-free ptr))))))
+      ;; 关闭失败（典型 UV_EBUSY，仍有活跃 handle）时直接抛出：
+      ;; loop 保持注册且内存不释放，调用者可以关闭残留 handle 后重试
+      (with-uv-check uv-loop-close
+        (%ffi-uv-loop-close ptr))
+      ;; 关闭成功后才注销并释放；默认 loop 的内存属于 libuv，不能 free
+      (unregister-loop! loop)
+      (unless (= ptr (%ffi-uv-default-loop))
+        (safe-free ptr))))
 
   (define (uv-default-loop)
     "获取默认事件循环（全局单例）

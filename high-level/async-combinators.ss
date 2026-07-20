@@ -22,6 +22,7 @@
     &timeout-error
     make-timeout-error
     timeout-error?
+    timeout-error-timeout-ms
 
     ;; 并发组合器（promise-all/race/any 的别名）
     async-all
@@ -95,22 +96,23 @@
      timeout-ms: 超时时间（毫秒）
      返回: Promise<any>
      行为:
-     - 如果在超时前完成，返回 Promise 的结果
-     - 如果超时，reject 并附带 &timeout-error 条件
-     实现: 使用 async-race 让原始 promise 和超时 promise 竞争"
+     - 如果在超时前完成，返回 Promise 的结果，并立即取消超时 timer
+       （否则空 timer 会把事件循环拖住整个超时时长）
+     - 如果超时，reject 并附带 &timeout-error 条件（原操作继续执行，结果被丢弃）"
     (let ([loop (uv-default-loop)])
-      (async-race
-        (list
-          promise
-          (make-promise loop
-            (lambda (resolve reject)
-              (run-after loop timeout-ms
-                (lambda ()
-                  (reject
-                    (condition
-                      (make-timeout-error timeout-ms)
-                      (make-message-condition
-                        (format "Operation timed out after ~a ms" timeout-ms))))))))))))
+      (make-promise loop
+        (lambda (resolve reject)
+          (let ([cancel-timer
+                 (run-after-cancellable loop timeout-ms
+                   (lambda ()
+                     (reject
+                       (condition
+                         (make-timeout-error timeout-ms)
+                         (make-message-condition
+                           (format "Operation timed out after ~a ms" timeout-ms))))))])
+            (promise-then promise
+              (lambda (value) (cancel-timer) (resolve value))
+              (lambda (reason) (cancel-timer) (reject reason))))))))
 
   ;; ========================================
   ;; async-delay - 延迟执行异步操作
