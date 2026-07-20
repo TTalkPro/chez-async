@@ -6,10 +6,10 @@
 ;;;
 ;;; 用法：
 ;;;   # 启动服务器
-;;;   scheme --libdirs .:.. --program examples/pipe-ipc.ss server
+;;;   scheme --libdirs . --program examples/pipe-ipc.ss server
 ;;;
 ;;;   # 在另一个终端启动客户端
-;;;   scheme --libdirs .:.. --program examples/pipe-ipc.ss client
+;;;   scheme --libdirs . --program examples/pipe-ipc.ss client
 ;;;
 ;;;   # 或使用 socat 测试
 ;;;   echo "Hello" | socat - UNIX-CONNECT:/tmp/chez-async-echo.sock

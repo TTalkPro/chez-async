@@ -5,7 +5,7 @@
 ;;; 服务器监听指定端口，将收到的数据报原样返回给发送方。
 ;;;
 ;;; 用法：
-;;;   scheme --libdirs .:.. --program examples/udp-echo-server.ss
+;;;   scheme --libdirs . --program examples/udp-echo-server.ss
 ;;;
 ;;; 测试：
 ;;;   echo "Hello" | nc -u 127.0.0.1 8081

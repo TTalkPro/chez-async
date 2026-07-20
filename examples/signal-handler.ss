@@ -5,7 +5,7 @@
 ;;; 程序会监听 SIGINT (Ctrl+C) 和 SIGTERM，实现优雅关闭。
 ;;;
 ;;; 用法：
-;;;   scheme --libdirs .:.. --program examples/signal-handler.ss
+;;;   scheme --libdirs . --program examples/signal-handler.ss
 ;;;
 ;;; 测试：
 ;;;   1. 运行程序

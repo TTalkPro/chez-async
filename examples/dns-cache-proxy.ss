@@ -10,7 +10,7 @@
 ;;; - 查询协程使用 await 等待上游 DNS 响应
 ;;;
 ;;; 用法：
-;;;   scheme --libdirs .:.. --program examples/dns-cache-proxy.ss
+;;;   scheme --libdirs . --program examples/dns-cache-proxy.ss
 ;;;
 ;;; 测试：
 ;;;   dig @127.0.0.1 -p 15353 example.com

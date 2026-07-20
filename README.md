@@ -484,72 +484,56 @@ Promise 完成，回调触发
 
 ## 项目结构
 
+> **布局（门面模式）**：项目根即库解析的 libdir。门面入口 `chez-async.ss` 提供
+> `(library (chez-async) …)`；所有子模块 `(chez-async …)` 的真实源码位于同名的
+> `chez-async/` 命名空间目录下（不使用软链接）。运行：`scheme --libdirs . --program …`。
+
 ```
-chez-async/
-├── high-level/               # 用户 API
-│   ├── promise.ss            # Promise 实现
-│   ├── async-await.ss        # async/await 宏
-│   ├── async-combinators.ss  # 组合器
-│   ├── async-work.ss         # 异步任务（线程池）
-│   ├── cancellation.ss       # 取消令牌
-│   ├── event-loop.ss         # 事件循环封装
-│   └── stream.ss             # 高级 Stream API
+chez-async/                       # 项目根（= 库解析 libdir）
+├── chez-async.ss                 # 门面入口：(library (chez-async) …)，重导出全部高层 API
 │
-├── internal/                 # 内部实现
-│   ├── scheduler.ss          # 协程调度器
-│   ├── coroutine.ss          # 协程数据结构
-│   ├── promise-core.ss       # Promise 核心类型
-│   ├── loop-registry.ss      # 事件循环注册表
-│   ├── callback-registry.ss  # 回调注册
-│   ├── macros.ss             # 宏工具
-│   ├── handle-utils.ss       # 句柄工具宏
-│   ├── buffer-utils.ss       # 缓冲区工具
-│   ├── foreign-utils.ss      # FFI 工具函数
-│   └── utils.ss              # 通用工具
+├── chez-async/                   # 库命名空间 (chez-async …)：真实源码，无软链接
+│   ├── high-level/               # (chez-async high-level …) 用户 API
+│   │   ├── promise.ss            # Promise 实现
+│   │   ├── async-await.ss        # async/await 宏
+│   │   ├── async-combinators.ss  # 组合器
+│   │   ├── async-work.ss         # 异步任务（线程池）
+│   │   ├── cancellation.ss       # 取消令牌
+│   │   ├── event-loop.ss         # 事件循环封装
+│   │   └── stream.ss             # 高级 Stream API
+│   │
+│   ├── internal/                 # (chez-async internal …) 内部实现
+│   │   ├── scheduler.ss          # 协程调度器（含 drive-loop 统一驱动器）
+│   │   ├── coroutine.ss          # 协程数据结构
+│   │   ├── promise-core.ss       # Promise 核心类型 + 微任务调度器注入点
+│   │   ├── loop-registry.ss      # 事件循环注册表 + 调度器驱动注入点
+│   │   ├── callback-registry.ss  # 统一回调注册表
+│   │   ├── macros.ss             # FFI/资源/句柄操作宏
+│   │   ├── handle-utils.ss       # 句柄工具宏
+│   │   ├── foreign.ss            # C 字符串/内存/uv_buf_t 工具（含批量拷贝）
+│   │   ├── posix-ffi.ss          # POSIX 系统调用封装
+│   │   ├── debug.ss              # 调试工具
+│   │   └── utils.ss              # 通用工具
+│   │
+│   ├── low-level/                # (chez-async low-level …) libuv 封装
+│   │   ├── tcp.ss  udp.ss  stream.ss  pipe.ss  tty.ss
+│   │   ├── timer.ss  fs.ss  dns.ss  signal.ss  process.ss  poll.ss
+│   │   ├── threadpool.ss  async.ss  idle.ss  check.ss  prepare.ss
+│   │   ├── fs-event.ss  fs-poll.ss
+│   │   └── handle-base.ss  request-base.ss  sockaddr.ss
+│   │
+│   ├── ffi/                      # (chez-async ffi …) FFI 绑定
+│   │   ├── types.ss  core.ss  handles.ss  requests.ss  callbacks.ss  errors.ss
+│   │   ├── tcp.ss  udp.ss  stream.ss  pipe.ss  tty.ss  timer.ss
+│   │   ├── fs.ss  dns.ss  signal.ss  process.ss  poll.ss
+│   │   └── idle.ss  check.ss  prepare.ss  fs-event.ss  fs-poll.ss  lib.ss
+│   │
+│   └── tests/
+│       └── framework.ss          # (chez-async tests framework) 测试框架库
 │
-├── low-level/                # libuv 封装
-│   ├── tcp.ss                # TCP 套接字
-│   ├── udp.ss                # UDP 套接字
-│   ├── stream.ss             # Stream 操作
-│   ├── pipe.ss               # 管道
-│   ├── tty.ss                # 终端
-│   ├── timer.ss              # 定时器
-│   ├── fs.ss                 # 文件系统
-│   ├── dns.ss                # DNS 解析
-│   ├── signal.ss             # 信号处理
-│   ├── process.ss            # 进程管理
-│   ├── poll.ss               # 轮询
-│   ├── threadpool.ss         # 线程池
-│   ├── handle-base.ss        # 句柄基础
-│   ├── request-base.ss       # 请求基础
-│   └── sockaddr.ss           # 地址处理
-│
-├── ffi/                      # FFI 绑定
-│   ├── types.ss              # C 类型定义
-│   ├── core.ss               # 核心函数
-│   ├── handles.ss            # 句柄 FFI
-│   ├── callbacks.ss          # 回调 FFI
-│   ├── tcp.ss                # TCP FFI
-│   ├── udp.ss                # UDP FFI
-│   ├── stream.ss             # Stream FFI
-│   ├── pipe.ss               # Pipe FFI
-│   ├── tty.ss                # TTY FFI
-│   ├── timer.ss              # Timer FFI
-│   ├── fs.ss                 # FS FFI
-│   ├── dns.ss                # DNS FFI
-│   ├── signal.ss             # Signal FFI
-│   ├── process.ss            # Process FFI
-│   └── poll.ss               # Poll FFI
-│
-├── tests/                    # 测试套件
-│   ├── test-tcp.ss           # TCP 测试
-│   ├── test-udp.ss           # UDP 测试
-│   ├── test-pipe.ss          # Pipe 测试
-│   ├── test-promise.ss       # Promise 测试
-│   ├── test-stream-high.ss   # Stream 测试
-│   ├── test-coroutine.ss     # 协程测试
-│   ├── test-cancellation.ss  # 取消机制测试
-│   └── ...                   # 更多测试文件
+├── tests/                        # 测试程序（scheme --libdirs . --program tests/test-*.ss）
+│   ├── test-tcp.ss  test-udp.ss  test-promise.ss  test-coroutine.ss …
+│   └── scratch/                  # 调试草稿（不由 run-tests.sh 运行）
 │
 ├── examples/                 # 示例代码
 │   ├── tcp-echo-server.ss    # TCP Echo 服务器
@@ -647,8 +631,8 @@ chez-async/
 cd chez-async
 
 # 运行单个测试
-scheme --libdirs .:.:. --program tests/test-tcp.ss
-scheme --libdirs .:.:. --program tests/test-async.ss
+scheme --libdirs . --program tests/test-tcp.ss
+scheme --libdirs . --program tests/test-async.ss
 
 # 运行所有测试
 ./run-tests.sh
