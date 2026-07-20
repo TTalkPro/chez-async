@@ -248,7 +248,11 @@
      work: (lambda () ...) - 工作函数
      callback: (lambda (result) ...) - 成功回调
      error-handler: (lambda (error) ...) - 错误回调
-     返回: task-id"
+     返回: task-id
+
+     线程安全约束：本函数只能从主线程（事件循环所在线程）调用。
+     它对 next-task-id 做非原子读改写、并写入非线程安全的 task-map，
+     从工作线程或多线程并发调用会导致 ID 冲突 / 数据竞争。"
     (unless (threadpool-running? pool)
       (error 'threadpool-submit! "threadpool not running"))
     ;; 生成任务 ID

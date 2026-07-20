@@ -168,13 +168,27 @@
   ;; 组合器
   ;; ========================================
 
+  (define (combinator-loop who promises)
+    "校验 promises 全部属于同一个事件循环并返回该 loop。
+     跨 loop 混用会导致微任务/唤醒落到错误的循环，静默取第一个 loop
+     会产生难以排查的行为，故此处显式报错。假定 promises 非空。"
+    (let ([loop (promise-record-loop (car promises))])
+      (for-each
+        (lambda (p)
+          (unless (promise-record? p)
+            (error who "not a promise" p))
+          (unless (eq? (promise-record-loop p) loop)
+            (error who "all promises must belong to the same event loop")))
+        promises)
+      loop))
+
   (define (promise-all promises)
     "等待所有 Promise 完成
      如果任何一个失败，立即返回失败的 Promise
      成功时返回所有值的列表（保持顺序）"
     (if (null? promises)
         (promise-resolved '())
-        (let* ([loop (promise-record-loop (car promises))]
+        (let* ([loop (combinator-loop 'promise-all promises)]
                [count (length promises)]
                [results (make-vector count #f)]
                [completed (box 0)]
@@ -201,7 +215,7 @@
     "返回第一个完成的 Promise 的结果（无论成功或失败）"
     (if (null? promises)
         (make-promise (uv-default-loop) (lambda (resolve reject) #f))  ; 永远 pending
-        (let* ([loop (promise-record-loop (car promises))]
+        (let* ([loop (combinator-loop 'promise-race promises)]
                [finished (box #f)])
           (make-promise loop
             (lambda (resolve reject)
@@ -223,7 +237,7 @@
      如果所有都失败，返回包含所有错误的失败 Promise"
     (if (null? promises)
         (promise-rejected "No promises provided")
-        (let* ([loop (promise-record-loop (car promises))]
+        (let* ([loop (combinator-loop 'promise-any promises)]
                [count (length promises)]
                [errors (make-vector count #f)]
                [rejected-count (box 0)]
@@ -252,7 +266,7 @@
      status 为 'fulfilled 或 'rejected"
     (if (null? promises)
         (promise-resolved '())
-        (let* ([loop (promise-record-loop (car promises))]
+        (let* ([loop (combinator-loop 'promise-all-settled promises)]
                [count (length promises)]
                [results (make-vector count #f)]
                [completed (box 0)])
