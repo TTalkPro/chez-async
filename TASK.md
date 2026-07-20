@@ -80,7 +80,7 @@
 
 ## E. 后续补强 — 回归测试与提交（建议下一轮优先做）
 
-- [ ] E1. **为本轮修复补回归测试**。19/19 通过只说明没改坏现有行为；本轮修的 UAF、
+- [x] E1. **为本轮修复补回归测试**。19/19 通过只说明没改坏现有行为；本轮修的 UAF、
       双重释放、GC 锁定只在错误路径 / GC 压力 / 堆碎片化下触发，现有测试覆盖不到。
       最有价值的用例：
       - UDP send 到不可达地址 / EBADF（走同步失败清理路径，验证无 double-free）
@@ -126,9 +126,21 @@
       - 取消语义（只 reject 包装、不中止底层 libuv 操作，AbortController 式）在模块头写明；
         真正的 `uv_cancel` 中止留作独立工作项（未做）。
       新增 `tests/test-cancellation-redesign.ss`（7 例）。23/23 通过。
-- [ ] F4. **unhandled rejection 完全静默**（`internal/promise-core.ss` reject 无钩子/日志）。
-      需定语义：何时判定"未处理"（GC 时？loop 退出时？），是否提供可配置钩子。
-      与裸 `spawn-coroutine!` 失败会打印 stderr 的行为也不一致。
+- [x] F4. **unhandled rejection 检测** —— 已完成（延迟一拍复查 + 可配置钩子）：
+      - promise-record 新增 `rejection-handled?` 字段；`promise-then` 总会把 rejection
+        传播给派生 promise，故 then 过即标记父为已负责（责任转移到链尾）；
+        `promise-wait` 消费 rejection 时也标记。
+      - `reject-promise!` 在 reject 时若无人负责，调度微任务延迟一拍复查——
+        同一轮同步挂 catch 来得及抑制；复查仍无人负责则调用
+        `unhandled-rejection-handler`（make-parameter，默认打印 stderr，可
+        parameterize 覆盖；已从 promise.ss 与 chez-async.ss 导出）。
+      - 覆盖动态 reject 路径：make-promise 的 reject、async 块异常、then 链传播。
+        **显式构造的 `promise-rejected` 豁免**：它是「值」而非「事件」，且构造器
+        不应有 loop 副作用（经检测微任务会创建 idle handle，令未运行的 loop 无法 close）。
+      - 上线即抓到一个潜伏 bug：test-async-combinators 的 then 回调 `assert-equal`
+        少传参抛异常被静默吞掉，现已修复。
+      测试见 `tests/test-promise-semantics.ss` 新增 4 例（报告/同步 catch 抑制/
+      async 块未捕获/promise-wait 抑制）。25/25 通过、全套件零误报。
 - [x] F5. **stream 高层重写**（`high-level/stream.ss`）—— 已完成：
       - stream-reader 改为「单一持续读 + 缓冲队列 + 等待者队列」解复用模型：
         多个并发 stream-reader-read 按 FIFO 依次拿到数据块（不再互相覆盖回调、
