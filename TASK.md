@@ -99,11 +99,15 @@
 
 ## F. 设计级缺陷（动手前需先定方案，按影响排序）
 
-- [ ] F1. **协程只在 `run-scheduler` 内运行**（`internal/scheduler.ss`）。
-      runnable 队列没有挂到任何 uv handle：普通 `uv-run` 驱动下 `(async ...)` 永不执行；
-      `run-scheduler` 退出后才 settle 的 promise 会 resume 协程入队但无人消费，
-      协程连同 continuation 悬挂泄漏。方向：给调度器挂 per-loop idle/prepare handle，
-      涉及调度器架构调整。当前功能可用性影响最大的一项。
+- [x] F1. **协程只在 `run-scheduler` 内运行** —— 已修复（方案 A，见
+      `docs/f1-scheduler-integration-design.md`）。抽出统一驱动器 `drive-loop`
+      （`internal/scheduler.ss`），`uv-run 'default` 在存在调度器时经注入的
+      `scheduler-driver`（`internal/loop-registry`）委托它，使 `(async ...)` +
+      `(uv-run loop 'default)` 可直接混用。用注入而非 event-loop import scheduler，
+      规避了「coroutine 进入 event-loop 依赖图 → 与 threadpool fork-thread 死锁」的
+      初始化顺序坑。新增 `tests/test-scheduler-integration.ss`（6 例）。22/22 通过。
+      注：协程逃逸仍严格在 Scheme 栈上（drive-loop 包裹 uv_run，不进 uv 回调），
+      保持 C 边界安全。
 - [ ] F2. **忙等自旋**：`high-level/promise.ss` `promise-wait`（:285-288）、
       `internal/scheduler.ss` scheduler-loop（:341-344）、`internal/macros.ss`
       `define-sync-wrapper` —— pending 但 loop 无活跃 handle 时 `uv_run` 立即返回，
