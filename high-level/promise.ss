@@ -298,13 +298,20 @@
   (define (promise-wait promise)
     "同步等待 Promise 完成并返回结果
      如果 Promise 失败，抛出异常
-     警告：这会阻塞当前线程，仅用于测试"
+     警告：这会阻塞当前线程，仅用于测试
+
+     死锁检测：uv_run 'once 返回 0 表示事件循环已无活跃（ref）句柄——
+     微任务待处理时 idle handle 处于 ref 状态、定时器/线程池 async 也都是 ref 的，
+     故返回 0 意味着再没有任何东西能推进这个 promise。此时不再空转，直接报错。"
     (let ([loop (promise-record-loop promise)])
       ;; 运行事件循环直到 promise 完成
       (let wait-loop ()
         (when (promise-pending? promise)
-          (uv-run loop 'once)
-          (wait-loop)))
+          (let ([active (uv-run loop 'once)])
+            (when (and (= active 0) (promise-pending? promise))
+              (error 'promise-wait
+                     "deadlock: promise is still pending but the event loop has no active handles to resolve it"))
+            (wait-loop))))
       ;; 返回结果或抛出错误
       (if (promise-fulfilled? promise)
           (promise-record-value promise)

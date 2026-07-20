@@ -352,8 +352,16 @@
           ;; 情况 2: 有等待中的协程，运行事件循环
           [(> (hashtable-size (scheduler-state-pending sched)) 0)
            ;; 阻塞式跑一次 libuv 事件循环，等待唤醒被 await 的 promise
-           (%ffi-uv-run ptr (uv-run-mode->int 'once))
-           (scheduler-loop)]
+           (let ([active (%ffi-uv-run ptr (uv-run-mode->int 'once))])
+             ;; 死锁检测：uv_run 返回 0（无活跃 ref 句柄）后，若无协程被唤醒进 runnable
+             ;; 且仍有协程在 pending，则再没有东西能推进它们，报错而非空转。
+             ;; （微任务待处理时 idle handle 为 ref 状态，uv_run 不会返回 0。）
+             (when (and (= active 0)
+                        (queue-empty? (scheduler-state-runnable sched))
+                        (> (hashtable-size (scheduler-state-pending sched)) 0))
+               (error 'run-scheduler
+                      "deadlock: coroutine(s) awaiting promises that the event loop can no longer resolve"))
+             (scheduler-loop))]
 
           ;; 情况 3: 协程队列已空
           [(eq? mode 'default)
