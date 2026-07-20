@@ -28,6 +28,10 @@
     uv-loop-scheduler-set!
     uv-loop-temp-buffers
 
+    ;; 调度器驱动注入（由 internal/scheduler 安装，供 high-level/event-loop 的 uv-run 使用）
+    scheduler-driver
+    install-scheduler-driver!
+
     ;; 全局循环注册表操作
     register-loop!           ; 注册循环到全局注册表
     unregister-loop!         ; 从全局注册表注销循环
@@ -73,6 +77,22 @@
                #f                     ; scheduler (initially none)
                (make-eqv-hashtable)  ; temp-buffers
                )))))
+
+  ;; ========================================
+  ;; 调度器驱动注入
+  ;; ========================================
+  ;;
+  ;; internal/scheduler 在加载时通过 install-scheduler-driver! 注入 drive-loop，
+  ;; high-level/event-loop 的 uv-run 在 'default 模式下调用它来一并驱动协程。
+  ;; 采用注入而非让 event-loop 直接 import scheduler：既保持层次方向（event-loop
+  ;; 不反向依赖 scheduler），也避免把 coroutine 拉进 event-loop 的依赖图
+  ;; （后者会与 threadpool 的 fork-thread 产生初始化顺序死锁）。
+  ;; 与微任务调度器（promise-core）相同的注入模式。
+
+  (define scheduler-driver (make-parameter #f))
+
+  (define (install-scheduler-driver! driver)
+    (scheduler-driver driver))
 
   ;; ========================================
   ;; 全局循环注册表

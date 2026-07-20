@@ -21,6 +21,7 @@
     suspend-for-promise!
     resume-coroutine!
     run-scheduler
+    drive-loop
     run-coroutine!
 
     ;; 调度器状态访问
@@ -307,16 +308,27 @@
   ;; 核心操作：run-scheduler
   ;; ========================================
 
-  (define (run-scheduler loop)
-    "运行调度器直到所有协程完成
+  (define (drive-loop loop mode)
+    "统一的协程 + 事件循环驱动器（协程始终在 Scheme 栈上运行）。
 
      loop: 事件循环
+     mode:
+       'scheduler - 协程工作（runnable + pending）清空即退出（旧 run-scheduler 语义）
+       'default   - 协程工作清空后，继续驱动其余非协程句柄，直到无活跃句柄
+                    （高层 uv-run 'default 委托此模式，使 async + uv-run 可直接混用）
 
      调度循环：
-     1. 如果有可运行的协程，执行它
-     2. 如果有等待中的协程，运行一次事件循环
-     3. 否则退出"
-    (let ([sched (get-scheduler loop)])
+     1. 有可运行协程 → 在 Scheme 栈上执行一个（await 经 scheduler-k 逃逸回此处）
+     2. 有协程在等待 → 阻塞式跑一次 libuv 循环（微任务/IO 触发 resume，仅入队，不跨 C 栈）
+     3. 协程队列已空 → 'default 下继续驱动其余句柄；'scheduler 下退出
+
+     C 边界约束：协程的 call/cc 逃逸/恢复必须发生在本 Scheme 栈上，
+     因此本驱动器包裹 %ffi-uv-run，而非住在某个 uv 回调内部。"
+    (let ([sched (get-scheduler loop)]
+          [ptr (uv-loop-ptr loop)])
+      (define (scheduler-work?)
+        (or (queue-not-empty? (scheduler-state-runnable sched))
+            (> (hashtable-size (scheduler-state-pending sched)) 0)))
       (let scheduler-loop ()
         ;; 在每次循环开始时设置 scheduler continuation
         ;; 这样 suspend-for-promise! 可以跳回这里
@@ -339,12 +351,28 @@
 
           ;; 情况 2: 有等待中的协程，运行事件循环
           [(> (hashtable-size (scheduler-state-pending sched)) 0)
-           ;; 运行一次 libuv 事件循环
-           (%ffi-uv-run (uv-loop-ptr loop) (uv-run-mode->int 'once))
+           ;; 阻塞式跑一次 libuv 事件循环，等待唤醒被 await 的 promise
+           (%ffi-uv-run ptr (uv-run-mode->int 'once))
            (scheduler-loop)]
 
-          ;; 情况 3: 所有协程完成
+          ;; 情况 3: 协程队列已空
+          [(eq? mode 'default)
+           ;; 继续驱动其余非协程句柄；每轮后重查，防止微任务又唤起协程/句柄
+           (let ([active (%ffi-uv-run ptr (uv-run-mode->int 'once))])
+             (if (or (scheduler-work?) (not (= active 0)))
+                 (scheduler-loop)
+                 (values)))]
+
+          ;; 'scheduler 模式：协程完成即退出
           [else
            (values)]))))
+
+  (define (run-scheduler loop)
+    "运行调度器直到所有协程完成（drive-loop 的 'scheduler 模式封装）"
+    (drive-loop loop 'scheduler))
+
+  ;; 加载时把 drive-loop 注入 loop-registry，供 high-level/event-loop 的 uv-run 'default 使用。
+  ;; 这样 async + 普通 uv-run 可直接混用，而 event-loop 无需反向 import 本模块。
+  (install-scheduler-driver! drive-loop)
 
 ) ; end library
