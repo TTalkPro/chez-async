@@ -445,10 +445,24 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
         `LD_LIBRARY_PATH=native/<mt>`。**28/28 全绿**。
       - 修 `io-run/output` stream 泄漏（capture 模式建 3 个 pipe stream，原只关
         stdout，现 stdin/stderr 一并关）。
-      Phase B（待定）：删除弃用的旧栈（promise-per-op、旧 async-await/scheduler、
-      low-level/ffi uv 绑定层）+ 其测试套件，让 `(chez-async)` 成为新栈。
-      **属不可逆大删除（~30 模块 + ~20 套件），需先确认精确范围**（尤其
-      R 组纯 Scheme runtime.ss/task.ss 与 promise/cancellation 是否保留）。
+      Phase B（**已完成**，用户定"全删，(chez-async)=新栈"）：
+      - 抽 `internal/buffer.ss`（bytevector↔foreign，(chezscheme)-only）断开新栈
+        对 `ffi/types` 的唯一牵连；io-fs/net/proc 改用之。
+      - **删除整个旧栈**：`ffi/`（24）、`low-level/`（21）、旧
+        `high-level/{promise,async-await,async-combinators,cancellation,
+        event-loop,stream,async-work,runtime,task}`（9）、旧
+        `internal/{callback-registry,coroutine,debug,foreign,handle-utils,
+        loop-registry,macros,posix-ffi,promise-core,scheduler,thread-queue,
+        utils}`（12）、~27 旧测试套件、旧 examples、冗余 `io.ss`。
+      - `chez-async.ss` 重写为新栈 umbrella（`(chez-async)` = io-runtime + io-fs/
+        net/proc/async 的再导出）。
+      - run-tests.sh 只跑 `tests/test-io.ss`（先 bake runtime + LD_LIBRARY_PATH）。
+      - 新 examples：`demo.ss`（async/await 并发 fs、并发 sleep、子进程、dns）、
+        `tcp-echo-server.ss`（每连接一协程）。
+      剩下 6 个 Scheme 模块：`internal/{io-runtime,buffer}` +
+      `high-level/{io-async,io-fs,io-net,io-proc}` + umbrella。`bake libs` 编译
+      全闭包无悬空依赖；`bake runtime`/`bake install`/run-tests（1 套件/13 例）
+      /demo 全通。**(chez-async) 现在就是纯 C++ 运行时栈——旧设计已放弃。**
 
 ## S-6. 零拷贝 / bake / 文档
 

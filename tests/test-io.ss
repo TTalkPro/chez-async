@@ -5,7 +5,7 @@
 
 (import (chezscheme)
         (chez-async tests framework)
-        (chez-async io))
+        (chez-async))
 
 (io-runtime-start!)
 

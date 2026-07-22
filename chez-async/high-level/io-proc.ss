@@ -10,7 +10,7 @@
     io-run io-run/output)
   (import (chezscheme)
           (chez-async internal io-runtime)
-          (chez-async internal foreign)
+          (chez-async internal buffer)
           (chez-async high-level io-net))   ; io-stream-read/close 读捕获的 stdout
 
   ;; 把字符串列表打包成一个 NUL 分隔的 bytevector。

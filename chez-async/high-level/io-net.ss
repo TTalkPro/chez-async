@@ -16,7 +16,7 @@
     io-listener-close)
   (import (chezscheme)
           (chez-async internal io-runtime)
-          (chez-async internal foreign))
+          (chez-async internal buffer))
 
   ;; --- buffer 桥接助手（同 io-fs，保持模块独立）---
 

@@ -28,7 +28,7 @@
     watch-event-rename? watch-event-change?)
   (import (chezscheme)
           (chez-async internal io-runtime)
-          (chez-async internal foreign))
+          (chez-async internal buffer))
 
   ;; --- open() 标志常量（Linux x86-64）---
   (define O_RDONLY 0)
