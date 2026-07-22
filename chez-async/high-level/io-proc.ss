@@ -64,11 +64,15 @@
         code)))
 
   ;; 跑到退出，捕获 stdout，返回 (退出码 . stdout-bytevector)。
+  ;; capture 模式建了 stdin/stdout/stderr 三个 pipe stream，都需各自 close
+  ;; （proc-close 只关 Process 句柄，不关 stdio stream，见 net.hpp）。
   (define (io-run/output . args)
     (let ([p (io-spawn args #f 'capture)])
-      (let ([out (io-proc-stdout p)])
+      (let ([in (io-proc-stdin p)] [out (io-proc-stdout p)] [err (io-proc-stderr p)])
+        (when in (io-stream-close in))          ; 关 stdin → 向子进程发 EOF
         (let ([data (read-stream-to-eof out)])
           (io-stream-close out)
+          (when err (io-stream-close err))
           (let ([code (io-proc-wait p)])
             (io-proc-close p)
             (cons code data))))))

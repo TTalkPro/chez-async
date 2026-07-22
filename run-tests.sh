@@ -13,6 +13,20 @@ ERRORS=""
 TIMEOUT_DEFAULT=15
 TIMEOUT_LONG=30
 
+# --- C++ task 运行时（native）：新 (chez-async io) 测试需要它在 LD_LIBRARY_PATH 上 ---
+MT=$(echo '(display (machine-type))' | scheme -q 2>/dev/null || echo ta6le)
+NATIVE_SO="native/$MT/chez-async-rt.so"
+if [ ! -f "$NATIVE_SO" ]; then
+    echo "构建 native 运行时 ($NATIVE_SO) …"
+    if command -v bake >/dev/null 2>&1 && bake runtime >/dev/null 2>&1; then :; \
+    elif [ -x native/build.sh ]; then native/build.sh >/dev/null 2>&1; fi
+fi
+if [ -f "$NATIVE_SO" ]; then
+    export LD_LIBRARY_PATH="$PWD/native/$MT${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+    echo "警告：$NATIVE_SO 缺失，(chez-async io) 测试将失败（需先 bake runtime）"
+fi
+
 run_test() {
     local name="$1"
     local file="$2"
@@ -87,6 +101,7 @@ run_test "Regression"          tests/test-regression.ss
 run_test "Phase 3 Integration" tests/test-phase3-integration.ss "$TIMEOUT_LONG"
 run_test "Runtime Thread"      tests/test-runtime.ss
 run_test "Task / CQ"           tests/test-task.ss
+run_test "IO Runtime (C++)"    tests/test-io.ss
 
 TOTAL=$((PASSED + FAILED))
 

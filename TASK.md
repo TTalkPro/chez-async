@@ -432,9 +432,23 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
 
 ## S-5. 收敛（此步才真正「放弃现在的设计」）
 
-- [ ] S5. async/await、async-combinators、high-level stream 全部落到 io-task；
-      删除弃用的纯 Scheme low-level uv 绑定层与 promise-per-op 路径；更新全部
-      测试。`make-promise` 保留给纯计算/组合器。
+- [~] S5. **Phase A（非破坏性整合）已完成；Phase B（删旧栈）待用户定范围。**
+      Phase A：
+      - `high-level/io-async.ss` 升级为**移植 skiff/async.ss**：Filinski
+        shift/reset delimited continuation + futures + `completed` 表修竞态。
+        API：`run-async`/`async`/`await`（future 或裸 task）/`await-all`/
+        `in-async?`/`future?`。取代 S4 的简版。
+      - **`(chez-async io)` umbrella**（`chez-async/io.ss`）：一行 import 拿到
+        新栈全部 API（lifecycle + async + fs + net + proc + timer + 错误 + cq）。
+      - `tests/test-io.ss`（框架，13 例）注册进 run-tests.sh；run-tests.sh 先
+        build native（bake runtime / native/build.sh）+ 导出
+        `LD_LIBRARY_PATH=native/<mt>`。**28/28 全绿**。
+      - 修 `io-run/output` stream 泄漏（capture 模式建 3 个 pipe stream，原只关
+        stdout，现 stdin/stderr 一并关）。
+      Phase B（待定）：删除弃用的旧栈（promise-per-op、旧 async-await/scheduler、
+      low-level/ffi uv 绑定层）+ 其测试套件，让 `(chez-async)` 成为新栈。
+      **属不可逆大删除（~30 模块 + ~20 套件），需先确认精确范围**（尤其
+      R 组纯 Scheme runtime.ss/task.ss 与 promise/cancellation 是否保留）。
 
 ## S-6. 零拷贝 / bake / 文档
 

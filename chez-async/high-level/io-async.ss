@@ -1,154 +1,189 @@
-;;; high-level/io-async.ss - 基于 C++ 运行时 cq 的协程调度器（对齐 skiff async）
+;;; high-level/io-async.ss - delimited-continuation async/await 调度器（移植 skiff/async.ss）
 ;;;
-;;; 让 io-fs/io-net/io-proc 那套**阻塞写法**的 API 在 async 块里自动变成协程挂起
-;;; （不阻塞 OS 线程）。机制 = skiff 的 cq-as-scheduler-substrate：
+;;; 把阻塞式 task 运行时变成 Node 式「同步写法、异步执行」。一个调度器 = 一个
+;;; Chez 线程跑多个协作 fiber；`await` 挂起 fiber（捕获其 delimited continuation）
+;;; 交还控制给调度循环，调度循环从单个 CompletionQueue 收割完成、resume 对应 fiber。
 ;;;
-;;;   - 重绑 io-runtime 的 await-hook：协程 await 一个 task 时，挂 task→协程 到
-;;;     pending 表并逃逸回调度器（不阻塞线程）；current-cq 重绑为调度器的 cq，
-;;;     故所有 io-* 提交都路由到它。
-;;;   - 调度器单线程 fiber 循环：有可运行协程就跑；否则 completion-queue-wait
-;;;     阻塞在调度器 cq 上，收割完成的 task → resume 对应协程（传回 task-result）。
-;;;   - 续延纪律照搬 internal/scheduler（已被 27 测试验证）：每轮 call/cc 重捕
-;;;     scheduler-k，协程经当前 scheduler-k 逃逸；完成则正常返回回调度循环。
-;;;     call/cc 逃逸严格在 Scheme 栈上（cq-wait 是普通 foreign call，返回后才
-;;;     invoke 续延，不跨 C 栈）。
+;;; 妙处：现有 io-fs/io-net/io-proc 的阻塞操作在这里**免费**变非阻塞——它们调
+;;; task-await，被调度器重绑（await-hook）为挂起而非阻塞，且用 (current-cq) 提交
+;;; （调度器指向自己的队列）。同一套 fs/net/proc API 在普通线程（阻塞）与 run-async
+;;; 内（挂起）都能用。
 ;;;
-;;; 前置：调用方已 io-runtime-start!（运行时是全局单例，不随 async-run 起停）。
+;;; 无竞态：调度器单线程，仅在静止（当前 fiber 已 park、登记好 waiter）时排队。
+;;; 提前到达的完成先在队列/completed 表里等着，绝不丢失。
+;;;
+;;; 前置：调用方已 io-runtime-start!（运行时是全局单例，不随 run-async 起停）。
+;;; 移植自 skiff src @ 93e0fd6 的 skiff/async.ss。
 
 (library (chez-async high-level io-async)
   (export
-    io-run-async          ; (thunk) → 跑一个根协程直到完成，返回其值（异常传播）
-    io-spawn-async        ; (thunk) → 在当前调度器内新起一个并发协程
-    in-io-async?)         ; 当前是否在 io-async 调度上下文中
+    run-async async await await-all
+    in-async? future?)
   (import (chezscheme)
           (chez-async internal io-runtime))
 
-  ;; ========================================
-  ;; 协程记录 + 简单 FIFO
-  ;; ========================================
+  ;; --- Filinski shift/reset（线程局部 metacontinuation）---
 
-  (define-record-type coro
-    (fields (immutable id) (mutable k) (mutable state) (mutable result) (mutable error)))
-  ;; state: 'new | 'running | 'suspended | 'done | 'failed
+  (define meta-prompt (make-thread-parameter #f))
 
-  (define next-id!
-    (let ([n 0]) (lambda () (set! n (+ n 1)) n)))
-
-  ;; 双列表 FIFO（均摊 O(1)）
-  (define-record-type fifo (fields (mutable out) (mutable in)))
-  (define (make-empty-fifo) (make-fifo '() '()))
-  (define (fifo-empty? q) (and (null? (fifo-out q)) (null? (fifo-in q))))
-  (define (fifo-push! q x) (fifo-in-set! q (cons x (fifo-in q))))
-  (define (fifo-pop! q)
-    (when (null? (fifo-out q))
-      (fifo-out-set! q (reverse (fifo-in q)))
-      (fifo-in-set! q '()))
-    (let ([x (car (fifo-out q))]) (fifo-out-set! q (cdr (fifo-out q))) x))
-
-  ;; ========================================
-  ;; 调度器状态（每 io-run-async 一份）
-  ;; ========================================
-
-  (define-record-type sched
-    (fields (immutable cq) (immutable pending) (immutable runnable)
-            (mutable scheduler-k)))
-  ;; pending: eq-hashtable  task-handle(uptr) → coro
-  ;; runnable: fifo of coro
-
-  (define current-sched (make-thread-parameter #f))
-  (define current-coro (make-thread-parameter #f))
-
-  (define (in-io-async?) (and (current-sched) #t))
-
-  ;; ========================================
-  ;; await-hook：协程 await 一个 task → 挂起、逃逸调度器
-  ;; ========================================
-  ;;
-  ;; 由 io-runtime 的 task-await 调用（(await-hook t)）。捕获当前协程续延，
-  ;; 挂 task→协程 到 pending，跳回 scheduler-k。resume 时以 task-result 返回。
-
-  (define (suspend-for-task! t)
-    (let ([s (current-sched)]
-          [c (current-coro)])
+  (define (reset* thunk)
+    (let ([saved (meta-prompt)])
       (call/cc
         (lambda (k)
-          (coro-k-set! c k)
-          (coro-state-set! c 'suspended)
-          (hashtable-set! (sched-pending s) t c)
-          ((sched-scheduler-k s) (void))))))   ; 逃逸回调度循环
+          (meta-prompt (lambda (v) (meta-prompt saved) (k v)))
+          (let ([result (thunk)]) ((meta-prompt) result))))))
 
-  ;; ========================================
-  ;; 运行一个协程（首次或 resume）
-  ;; ========================================
+  (define (shift* f)
+    (call/cc
+      (lambda (k)
+        (let ([ck (lambda (v) (reset* (lambda () (k v))))])
+          ((meta-prompt) (f ck))))))
 
-  (define (run-coro! s c)
-    (parameterize ([current-coro c] [current-sched s])
-      (let ([k (coro-k c)] [first? (eq? (coro-state c) 'new)])
-        (coro-k-set! c #f)
-        (coro-state-set! c 'running)
-        (if first? (k #f) (k (coro-result c))))))
+  (define suspended (list 'suspended))          ; 唯一 token
+  (define (run-step thunk)                       ; → (ok . v) | (err . c) | suspended
+    (reset* (lambda () (guard (e [#t (cons 'err e)]) (cons 'ok (thunk))))))
 
-  ;; 包装用户 thunk：完成置 done/result，异常置 failed/error（不杀调度器）。
-  (define (wrap-coro c thunk root?)
-    (lambda (_)
-      (guard (e [else
-                 (coro-state-set! c 'failed)
-                 (coro-error-set! c e)
-                 (unless root?
-                   (fprintf (current-error-port)
-                            "[io-async coro ~a] 未捕获异常: ~a~n" (coro-id c) e))])
-        (let ([v (thunk)])
-          (coro-state-set! c 'done)
-          (coro-result-set! c v)))))
+  ;; --- futures ---
+  ;; future 同时是 fiber 身份：resolve/fail 它即交付其代表计算的结果。
 
-  ;; ========================================
-  ;; io-spawn-async：当前调度器内新起并发协程
-  ;; ========================================
+  (define-record-type future
+    (fields (mutable state) (mutable waiters))   ; state: 'pending | (ok . v) | (err . c)
+    (protocol (lambda (new) (lambda () (new 'pending '())))))
 
-  (define (io-spawn-async thunk)
-    (let ([s (current-sched)])
-      (unless s (error 'io-spawn-async "not in an io-async context"))
-      (let ([c (make-coro (next-id!) #f 'new #f #f)])
-        (coro-k-set! c (wrap-coro c thunk #f))
-        (fifo-push! (sched-runnable s) c)
-        c)))
+  ;; --- 调度器 ---
 
-  ;; ========================================
-  ;; io-run-async：跑根协程直到完成
-  ;; ========================================
+  (define-record-type scheduler
+    (fields cq (mutable ready) waiters completed)
+    ;; ready: 逆序 list of (future . step-producer)
+    ;; waiters: task-handle → wake（await 在其完成前 park）
+    ;; completed: task-handle → result（完成早于 await 注册时暂存，否则那个 await
+    ;;   会永远挂起——绝不丢）
+    (protocol
+      (lambda (new)
+        (lambda (cq) (new cq '() (make-eqv-hashtable) (make-eqv-hashtable))))))
 
-  (define (io-run-async root-thunk)
-    (let ([s (make-sched (make-completion-queue) (make-eq-hashtable)
-                         (make-empty-fifo) #f)])
-      (define root (make-coro (next-id!) #f 'new #f #f))
-      (coro-k-set! root (wrap-coro root root-thunk #t))
-      (fifo-push! (sched-runnable s) root)
-      ;; 在整个调度期间：await-hook 挂起、current-cq 路由到本调度器 cq
-      (parameterize ([current-cq (sched-cq s)]
-                     [await-hook suspend-for-task!]
-                     [current-sched s])
-        (let loop ()
-          ;; 每轮重捕 scheduler-k：协程经它逃逸回这里
-          (call/cc (lambda (k) (sched-scheduler-k-set! s k)))
-          (cond
-            [(not (fifo-empty? (sched-runnable s)))
-             (run-coro! s (fifo-pop! (sched-runnable s)))
-             (loop)]
-            [(> (hashtable-size (sched-pending s)) 0)
-             ;; 无可运行协程：阻塞收割一个完成的 task，resume 其协程
-             (let ([t (completion-queue-wait (sched-cq s))])
-               (let ([c (hashtable-ref (sched-pending s) t #f)])
-                 (hashtable-delete! (sched-pending s) t)
-                 (when c
-                   (coro-result-set! c (task-result t))
-                   (coro-state-set! c 'running)
-                   (fifo-push! (sched-runnable s) c))))
-             (loop)]
-            [else (void)])))
-      ;; 调度结束：释放 cq，返回根结果或重抛根异常
-      (completion-queue-free (sched-cq s))
-      (if (eq? (coro-state root) 'failed)
-          (raise (coro-error root))
-          (coro-result root))))
+  (define current-scheduler (make-thread-parameter #f))
+  (define current-fiber (make-thread-parameter #f))
+
+  (define (in-async?) (and (current-scheduler) #t))
+
+  (define (enqueue-ready! sch item)
+    (scheduler-ready-set! sch (cons item (scheduler-ready sch))))
+
+  ;; 挂起当前 fiber。register! 收到一个 wake 过程：以某值调用它即把 fiber 重排为
+  ;; 用该值 resume。
+  (define (park! register!)
+    (let ([sch (current-scheduler)] [fib (current-fiber)])
+      (unless sch (error 'await "not inside run-async"))
+      (shift*
+        (lambda (resume-k)
+          (register! (lambda (value)
+                       (enqueue-ready! sch (cons fib (lambda () (resume-k value))))))
+          suspended))))
+
+  ;; await-hook：挂起在一个裸 task 句柄上；运行时把完成 post 到队列后，调度器以
+  ;; task-result 唤醒。若完成已到（暂存在 completed 表），直接消费不 park。
+  (define (scheduler-await t)
+    (let ([sch (current-scheduler)])
+      (unless sch (error 'await "not inside run-async"))
+      (let ([done (hashtable-ref (scheduler-completed sch) t #f)])
+        (if done
+            (begin (hashtable-delete! (scheduler-completed sch) t) done)
+            (park! (lambda (wake)
+                     (hashtable-set! (scheduler-waiters sch) t wake)))))))
+
+  ;; --- fiber 执行 ---
+
+  (define (settle! f outcome)
+    (future-state-set! f outcome)
+    (let ([ws (future-waiters f)])
+      (future-waiters-set! f '())
+      (for-each (lambda (wake) (wake #f)) ws)))   ; 值忽略；awaiter 重查
+
+  (define (handle-step fib step)
+    (cond
+      [(eq? step suspended) (void)]               ; 已 park
+      [else (settle! fib step)]))                 ; (ok . v) / (err . c)
+
+  (define (run-fiber! fib produce-step)
+    (handle-step fib (parameterize ([current-fiber fib]) (produce-step))))
+
+  (define (deliver-one! sch h)
+    (let ([wake (hashtable-ref (scheduler-waiters sch) h #f)])
+      (if wake
+          (begin
+            (hashtable-delete! (scheduler-waiters sch) h)
+            (wake (task-result h)))               ; 排入 resume
+          ;; 尚无 waiter：暂存给稍后的 scheduler-await。绝不丢（丢则那个 await 永挂）。
+          (hashtable-set! (scheduler-completed sch) h (task-result h)))))
+
+  (define (scheduler-loop sch)
+    (let loop ()
+      ;; 跑完当前所有 ready fiber（批内 FIFO）。
+      (let ([batch (reverse (scheduler-ready sch))])
+        (scheduler-ready-set! sch '())
+        (for-each (lambda (item) (run-fiber! (car item) (cdr item))) batch))
+      (cond
+        [(pair? (scheduler-ready sch)) (loop)]     ; 上面又产生了新工作
+        [(fx> (hashtable-size (scheduler-waiters sch)) 0)
+         ;; 阻塞收一个完成，再排干已 post 的其余。
+         (deliver-one! sch (completion-queue-wait (scheduler-cq sch)))
+         (let poll ()
+           (let ([h (completion-queue-try-pop (scheduler-cq sch))])
+             (when h (deliver-one! sch h) (poll))))
+         (loop)]
+        [else (void)])))                           ; 静止：完成
+
+  ;; --- 公共 API ---
+
+  ;; 起一个并发 fiber，返回其结果的 future。
+  (define (async thunk)
+    (let ([sch (current-scheduler)])
+      (unless sch (error 'async "not inside run-async"))
+      (let ([f (make-future)])
+        (enqueue-ready! sch (cons f (lambda () (run-step thunk))))
+        f)))
+
+  (define (await-future f)
+    (let ([st (future-state f)])
+      (cond
+        [(eq? st 'pending)
+         (park! (lambda (wake)
+                  (future-waiters-set! f (cons wake (future-waiters f)))))
+         (await-future f)]                         ; resume 后重查
+        [(eq? (car st) 'ok) (cdr st)]
+        [else (raise (cdr st))])))
+
+  ;; 挂起至 x resolve；x 是 future 或裸 task 句柄。
+  (define (await x)
+    (cond
+      [(future? x) (await-future x)]
+      [(and (integer? x) (exact? x)) (scheduler-await x)]
+      [else (error 'await "not awaitable" x)]))
+
+  ;; await 一组 future，返回其值（它们并发运行）。
+  (define (await-all fs) (map await fs))
+
+  ;; 在当前线程新调度器里跑 root-thunk；它与其 spawn 的所有 fiber 都 settle 后
+  ;; 返回其值（或重抛错误）。
+  (define (run-async root-thunk)
+    (when (current-scheduler) (error 'run-async "run-async cannot be nested"))
+    (let ([cq (make-completion-queue)])
+      (dynamic-wind
+        (lambda () (void))
+        (lambda ()
+          (let ([sch (make-scheduler cq)])
+            (parameterize ([current-scheduler sch]
+                           [current-cq cq]
+                           [await-hook scheduler-await])
+              (let ([root (async root-thunk)])
+                (scheduler-loop sch)
+                (let ([st (future-state root)])
+                  (cond
+                    [(eq? st 'pending)
+                     (error 'run-async "deadlock: root fiber never settled")]
+                    [(eq? (car st) 'ok) (cdr st)]
+                    [else (raise (cdr st))]))))))
+        (lambda () (completion-queue-free cq)))))
 
 ) ; end library
