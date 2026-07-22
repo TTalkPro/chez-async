@@ -20,9 +20,11 @@ if(PkgConfig_FOUND)
   pkg_check_modules(LIBUV libuv)
 endif()
 
-# S0 原型:最小运行时。S1 起换成 vendor 的 skiff runtime 源集。
+# S1:vendor 自 skiff src/runtime @ 93e0fd6 的 task 运行时（纯 C++/libuv）。
+# task.hpp/net.hpp/runtime.hpp 是头文件；编译单元是 runtime.cpp + rt_ffi.cpp。
 add_library(chez-async-rt SHARED
-  runtime/rt_mini.cpp)
+  runtime/runtime.cpp
+  runtime/rt_ffi.cpp)
 
 target_include_directories(chez-async-rt PRIVATE ${LIBUV_INCLUDE_DIRS})
 

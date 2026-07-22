@@ -326,10 +326,19 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
 
 ## S-1. 构建骨架 + vendor
 
-- [ ] S1. `native/` CMake/C++23 工程，vendor skiff task.hpp/runtime.*/net.hpp +
-      裁剪的 `rt_ffi.cpp`（砍 http/http2/ws/tls/pinned/内嵌 Chez；符号 rt_ 前缀），
-      链 system libuv，产 `libchez-async-rt.so`。注明来源 skiff commit。
-      run-tests.sh / 构建脚本集成（.so 就位后才跑 Scheme 测试）。
+- [x] S1. **已完成。** `native/` CMake/C++23 工程 vendor 自 skiff @ 93e0fd6：
+      `runtime/{task.hpp,net.hpp,runtime.hpp,runtime.cpp}`（namespace skiff→
+      **cart**，来源头注释）+ `rt_runtime.h`（C ABI，rt_ 前缀，砍 pinned/
+      http/http2/ws/tls）+ `rt_ffi.cpp`（裁剪自 ffi.cpp：去 scheme.h、buffer
+      参数改裸 foreign void*、rt_ 前缀）。`native/CMakeLists.txt`（C++23，
+      pkg-config 链 system libuv）+ `native/build.sh`。产物
+      `libchez-async-rt.so`：61 个 rt_ 符号、**零 Chez 依赖**（只链
+      libuv/libstdc++/libc）。gate `tests/scratch/rt-runtime-gate.ss` 全过：
+      timer、fs 往返（open+write+read+close+stat，UTF-8 内容一致）、dns
+      resolve localhost、task 泄漏计数=0。Scheme 27/27 仍绿（.so 尚未被
+      Scheme 引用）。
+      注：符号命名用户定 `rt_` 前缀；vendor 方式用户定直接 copy。运行时加载需
+      `LD_LIBRARY_PATH=native/build`（S6 再定安装路径）。
 
 ## S-2. Scheme 绑定层
 
