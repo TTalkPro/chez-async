@@ -46,6 +46,34 @@
     (assert-error (lambda () (io-open "/nonexistent-dir-zzz/f" O_RDONLY 0))
                   "open nonexistent raises"))
 
+  ;; ---- pinned 零拷贝 fs ----
+  (test "pinned io-write! / io-read! 往返（零拷贝）"
+    (let ([path "/tmp/test-io-pinned.txt"]
+          [msg (string->utf8 "pinned 零拷贝 你好 🚀")])
+      ;; 写：pinned 写整个 bytevector
+      (let ([fd (io-open path (fxior O_WRONLY O_CREAT O_TRUNC) #o644)])
+        (io-write! fd msg 0)
+        (io-close fd))
+      ;; 读：pinned 读进调用方 bytevector
+      (let* ([len (bytevector-length msg)]
+             [buf (make-bytevector len 0)]
+             [fd (io-open path O_RDONLY 0)])
+        (let ([n (io-read! fd buf 0 len -1)])
+          (io-close fd)
+          (io-unlink path)
+          (assert-equal len n "pinned read count")
+          (assert-true (bytevector=? buf msg) "pinned round-trip equals")))))
+
+  (test "pinned io-read! EOF"
+    (let ([path "/tmp/test-io-pinned-eof.txt"])
+      (io-write-file path (string->utf8 "ab"))
+      (let ([fd (io-open path O_RDONLY 0)] [buf (make-bytevector 8 0)])
+        (io-read! fd buf 0 8 -1)                ; 读到 "ab"
+        (let ([r (io-read! fd buf 0 8 -1)])     ; 再读 → EOF
+          (io-close fd)
+          (io-unlink path)
+          (assert-true (eof-object? r) "second pinned read is EOF")))))
+
   ;; ---- net ----
   (test "dns-resolve localhost 回环"
     (let ([ip (io-dns-resolve "localhost")])

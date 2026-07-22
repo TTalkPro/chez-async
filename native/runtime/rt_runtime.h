@@ -84,6 +84,19 @@ uint64_t rt_stream_write_queue_size(uintptr_t stream);
 uintptr_t rt_stream_close(uintptr_t stream, uintptr_t cq);
 uintptr_t rt_listener_close(uintptr_t listener, uintptr_t cq);
 
+/* pinned 零拷贝变体（S6）：I/O 直接落在 bytevector 字节上，用 Slock_object 锁到
+ * rt_task_free（在其解锁）。bytevector 作 scheme-object 传入（Scheme 侧绑
+ * scheme-object；此处声明为 void*）。无中间 buffer、无拷贝。read 完成即为读到
+ * 字节数（直接在 bytevector 里），不需 rt_read_into。 */
+uintptr_t rt_fs_read_pinned(int fd, void* bytevector, uint32_t start,
+                            uint32_t nbytes, int64_t offset, uintptr_t cq);
+uintptr_t rt_fs_write_pinned(int fd, void* bytevector, uint32_t start,
+                             uint32_t nbytes, int64_t offset, uintptr_t cq);
+uintptr_t rt_stream_read_pinned(uintptr_t stream, void* bytevector,
+                                uint32_t start, uint32_t nbytes, uintptr_t cq);
+uintptr_t rt_stream_write_pinned(uintptr_t stream, void* bytevector,
+                                 uint32_t start, uint32_t nbytes, uintptr_t cq);
+
 /* DNS。host(+可选 service，""=无)→数字 IP：首个经 rt_str_result，全部经
  * rt_scandir_count/name。family：0=any/4/6。task 结果 0 或负 errno。 */
 uintptr_t rt_dns_resolve(const char* host, const char* service, int family,

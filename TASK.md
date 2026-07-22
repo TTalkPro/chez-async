@@ -466,7 +466,22 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
 
 ## S-6. 零拷贝 / bake / 文档
 
-- [ ] S6. v2 pinned 零拷贝（需 stock scheme 导出 Slock_object 给 .so，或
-      Sforeign_symbol 反向）；bake recipe（可选，与 CMake 并存）；README/
-      known-issues 更新；迁移说明（旧 low-level API → io-task）；可移植性
-      （runtime .so 跨平台 libuv 链接）。
+- [x] S6. **已完成。**
+      - **pinned 零拷贝**：feasibility 闸门确认 stock `scheme` 导出
+        `Slock_object`/`Sunlock_object`（360 个 `S*` 内核符号）到动态符号表，
+        `.so` 对其留未定义、dlopen 进宿主时解析（探针实测读到 bytevector 首字节）。
+        实现：`rt_ffi.cpp` 加 `#include "scheme.h"` + `new_pinned_task`（Slock）+
+        4 个 pinned 变体 + `rt_task_free` 配对 Sunlock；`io-runtime` 加 pinned 绑定
+        （scheme-object 直传）；`io-fs` 加 `io-read!`/`io-write!`、`io-net` 加
+        `io-stream-read!`/`io-stream-write!`（直接读写调用方 bytevector，零拷贝）；
+        `io-stream-pipe` 改复用 buffer + pinned（全零拷贝，对齐 skiff）。
+      - **构建切 Model B**：CMakeLists 要求 `CHEZ_INCLUDE`（scheme.h 目录）；
+        recipe `(chez-api #t)` 让 bake 注入 `-DCHEZ_INCLUDE`；build.sh 自算。
+        `.so` 因此带未定义 Chez 符号（只能加载进 Chez 宿主）——见 known-issues。
+      - **文档**：README 已在 S5 重写；新增 `docs/known-issues.md`（运行前提、
+        平台 Linux 特定项、pinned/Model B 约定、与旧设计相比消除的问题、未移植的
+        skiff 协议层）。
+      验证：feasibility 闸门 + test-io.ss 新增 2 pinned 例（往返 + EOF），
+      **15/15 全绿**；demo + bake libs 编译闭包干净。
+      未做（明确记录在 known-issues）：O_* 跨平台（Linux 硬编码）、macOS/Windows
+      soname/扩展名。属长期项，当前 Linux x86-64 优先。

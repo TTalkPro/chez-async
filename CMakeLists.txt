@@ -33,8 +33,16 @@ add_library(chez-async-rt SHARED
   native/runtime/runtime.cpp
   native/runtime/rt_ffi.cpp)
 
+# Chez C API 头（scheme.h）——pinned 零拷贝需要（Model B）。bake `(chez-api #t)`
+# 注入 -DCHEZ_INCLUDE；无 bake 时 build.sh 自算并传入。Slock_object 等符号在 .so
+# 里留未定义，dlopen 进宿主 scheme 时解析（stock scheme 已导出内核符号）。
+if(NOT CHEZ_INCLUDE)
+  message(FATAL_ERROR "CHEZ_INCLUDE 未设置（scheme.h 目录）；bake 用 (chez-api #t)，或 -DCHEZ_INCLUDE=…")
+endif()
+
 target_include_directories(chez-async-rt PRIVATE
   native/runtime
+  "${CHEZ_INCLUDE}"
   ${LIBUV_INCLUDE_DIRS})
 if(LIBUV_LIBRARIES)
   target_link_libraries(chez-async-rt PRIVATE ${LIBUV_LIBRARIES})

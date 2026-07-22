@@ -15,6 +15,7 @@
   (export
     ;; fd 级 I/O
     io-open io-read io-write io-close
+    io-read! io-write!                       ; pinned 零拷贝（读写调用方 bytevector）
     O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_APPEND
     ;; 目录与元数据
     io-mkdir io-rmdir io-unlink io-rename io-realpath io-scandir
@@ -83,6 +84,27 @@
                   bv start n)]))
 
   (define (io-close fd) (task-run-void 'io-close (submit-fs-close fd)))
+
+  ;; --- pinned 零拷贝：直接读写调用方 bytevector（无中间 buffer、无拷贝）---
+
+  ;; 读至多 n 字节直入 bv 的 [start,start+n)；返回读到字节数，EOF 返回 eof-object。
+  ;; bv 被 Slock_object 锁定至 task-free（下面已配对），期间勿让 bv 被回收。
+  (define (io-read! fd bv start n offset)
+    (let* ([t (submit-fs-read-pinned fd bv start n offset)]
+           [r (task-await t)])
+      (task-free t)                          ; 解锁 bv
+      (cond
+        [(< r 0) (raise-io-error 'io-read! r)]
+        [(= r 0) (eof-object)]
+        [else r])))
+
+  ;; 写 bv 的 [start,start+n)（零拷贝）；返回字节数。task-run 覆盖 submit→await→free，
+  ;; 锁跨整个异步写，await 完成后 free 解锁。
+  (define io-write!
+    (case-lambda
+      [(fd bv offset) (io-write! fd bv 0 (bytevector-length bv) offset)]
+      [(fd bv start n offset)
+       (task-run 'io-write! (submit-fs-write-pinned fd bv start n offset))]))
 
   ;; --- 目录与元数据 ---
 

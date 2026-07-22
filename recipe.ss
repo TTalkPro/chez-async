@@ -16,10 +16,14 @@
 
 (define-lib-roots ".")                       ; 库搜索根 = 仓库根（umbrella chez-async.ss 在根）
 
-;; ── native：C++ task 运行时（cmake 后端，Model A，dir "." → 落 native/<mt>/）──
+;; ── native：C++ task 运行时（cmake 后端，dir "." → 落 native/<mt>/）──
+;;   chez-api #t（Model B）：pinned 零拷贝用 scheme.h 的 Slock_object 等，bake 注入
+;;   -DCHEZ_INCLUDE 指向 scheme.h 目录。这些内核符号在 .so 里留未定义，dlopen 进
+;;   宿主 scheme 时解析（stock scheme 已导出）。
 (native-task 'runtime
   (dir ".")
   (build (cmake (targets "chez-async-rt")))
+  (chez-api #t)
   (produces "chez-async-rt"))
 
 ;; ── libs：编 (chez-async) umbrella + 其 import 闭包为 .so ──

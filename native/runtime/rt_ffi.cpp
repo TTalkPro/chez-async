@@ -1,19 +1,24 @@
 // extern "C" 实现 chez-async task-runtime 的 FFI 边界。
 // 移植自 skiff src/runtime/ffi.cpp @ 93e0fd6，改动：
 //   - 符号 skiff_* -> rt_*，命名空间 skiff -> cart。
-//   - 去掉 pinned 零拷贝变体与 scheme.h 依赖（不 include Chez 头）。
-//   - 写类/读类的 buffer 参数改为裸 foreign 指针（const void* / void*），
-//     memcpy 直接拷贝——不碰 Scheme 对象。Scheme 侧负责 bytevector<->foreign。
+//   - 非 pinned 写/读类 buffer 参数用裸 foreign 指针（const void* / void*），
+//     memcpy 直接拷贝。
+//   - pinned 零拷贝变体（S6）：I/O 直接落在 Slock_object 锁住的 Scheme bytevector
+//     上，无中间 buffer、无拷贝。scheme.h 的 Chez C API 符号（Slock_object 等）在
+//     .so 里留未定义，dlopen 进宿主 scheme 时从其动态符号表解析（stock scheme
+//     已导出这些内核符号）。构建需 CHEZ_INCLUDE 指向 scheme.h（bake chez-api #t /
+//     CMake -DCHEZ_INCLUDE）。
 //
 // 提交与结果访问器在 activated 的 Scheme 线程上运行（普通 foreign call 不会被
-// GC 打断，同步读写 foreign 内存安全）。只有 rt_await / rt_cq_wait 阻塞，且只收
-// 整数句柄。
+// GC 打断，同步读写 Scheme bytevector 安全）。只有 rt_await / rt_cq_wait 阻塞，
+// 且只收整数句柄。
 
 #include <sys/stat.h>
 
 #include <cstdint>
 #include <cstring>
 
+#include "scheme.h"        // Chez C API：ptr, Slock_object, Sbytevector_u8_ref（pinned）
 #include "rt_runtime.h"
 
 #include "net.hpp"
@@ -37,6 +42,19 @@ Task* new_task(Op op, uintptr_t cq) {
   auto* t = new Task(op);
   t->cq = as_cq(cq);
   if (t->cq) t->cq->Retain();  // released by Task::Complete after posting
+  return t;
+}
+
+// pinned 零拷贝：锁住 bytevector 的一段（在 activated 线程锁，rt_task_free 里解锁），
+// I/O 直接落在其字节上（loop 线程只经 ext_data 碰裸字节，从不碰 Scheme 对象）。
+Task* new_pinned_task(Op op, uintptr_t cq, void* bytevector, uint32_t start,
+                      uint32_t nbytes) {
+  Task* t = new_task(op, cq);
+  ptr bv = static_cast<ptr>(bytevector);
+  Slock_object(bv);
+  t->pinned_obj = bytevector;
+  t->ext_data = &Sbytevector_u8_ref(bv, start);
+  t->nbytes = nbytes;
   return t;
 }
 
@@ -265,6 +283,38 @@ uintptr_t rt_proc_close(uintptr_t process, uintptr_t cq) {
   return SubmitProcessOp(Op::ProcClose, process, cq);
 }
 
+// --- pinned 零拷贝变体（bytevector 作 scheme-object 传入）---
+
+uintptr_t rt_fs_read_pinned(int fd, void* bytevector, uint32_t start,
+                            uint32_t nbytes, int64_t offset, uintptr_t cq) {
+  Task* t = new_pinned_task(Op::FsRead, cq, bytevector, start, nbytes);
+  t->fd = fd;
+  t->offset = offset;
+  return Submit(t);
+}
+
+uintptr_t rt_fs_write_pinned(int fd, void* bytevector, uint32_t start,
+                             uint32_t nbytes, int64_t offset, uintptr_t cq) {
+  Task* t = new_pinned_task(Op::FsWrite, cq, bytevector, start, nbytes);
+  t->fd = fd;
+  t->offset = offset;
+  return Submit(t);
+}
+
+uintptr_t rt_stream_read_pinned(uintptr_t stream, void* bytevector,
+                                uint32_t start, uint32_t nbytes, uintptr_t cq) {
+  Task* t = new_pinned_task(Op::StreamRead, cq, bytevector, start, nbytes);
+  t->stream = reinterpret_cast<cart::Stream*>(stream);
+  return Submit(t);
+}
+
+uintptr_t rt_stream_write_pinned(uintptr_t stream, void* bytevector,
+                                 uint32_t start, uint32_t nbytes, uintptr_t cq) {
+  Task* t = new_pinned_task(Op::StreamWrite, cq, bytevector, start, nbytes);
+  t->stream = reinterpret_cast<cart::Stream*>(stream);
+  return Submit(t);
+}
+
 uint64_t rt_stream_write_queue_size(uintptr_t stream) {
   return reinterpret_cast<cart::Stream*>(stream)->stream()->write_queue_size;
 }
@@ -336,8 +386,11 @@ const char* rt_str_result(uintptr_t task) {
 }
 
 void rt_task_free(uintptr_t task) {
-  // 无 pinned 路径，直接删除（skiff 版此处 Sunlock_object，已随 pinned 去除）。
-  delete as_task(task);
+  Task* t = as_task(task);
+  // pinned task：在 activated 的 Scheme 线程上解锁 bytevector（与 new_pinned_task
+  // 的 Slock_object 配对）。
+  if (t->pinned_obj) Sunlock_object(static_cast<ptr>(t->pinned_obj));
+  delete t;
 }
 
 uintptr_t rt_cq_create(void) { return handle(new CompletionQueue()); }

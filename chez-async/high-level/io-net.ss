@@ -12,6 +12,7 @@
     io-dns-resolve io-dns-resolve-all
     io-tcp-connect io-tcp-listen io-tcp-accept
     io-stream-read io-stream-write io-stream-close
+    io-stream-read! io-stream-write!         ; pinned 零拷贝
     io-stream-pipe io-stream-write-queue-size
     io-listener-close)
   (import (chezscheme)
@@ -110,18 +111,39 @@
                   (lambda (src s nn) (submit-stream-write stream src s nn))
                   bv start n)]))
 
+  ;; --- pinned 零拷贝 stream I/O ---
+
+  ;; 读至多 n 字节直入 bv 的 [start,start+n)；返回字节数，EOF 返回 eof-object。
+  (define (io-stream-read! stream bv start n)
+    (let* ([t (submit-stream-read-pinned stream bv start n)]
+           [r (task-await t)])
+      (task-free t)
+      (cond
+        [(< r 0) (raise-io-error 'io-stream-read! r)]
+        [(= r 0) (eof-object)]
+        [else r])))
+
+  ;; 写 bv 的 [start,start+n)（零拷贝）；返回字节数。
+  (define io-stream-write!
+    (case-lambda
+      [(stream bv) (io-stream-write! stream bv 0 (bytevector-length bv))]
+      [(stream bv start n)
+       (task-run 'io-stream-write! (submit-stream-write-pinned stream bv start n))]))
+
   ;; 把 src 泵到 dst 直到 EOF；await 的写即背压。返回总字节数。两端都不关闭。
+  ;; 复用一个 bytevector + pinned 读写 → 全零拷贝（对齐 skiff stream-pipe）。
   (define io-stream-pipe
     (case-lambda
       [(src dst) (io-stream-pipe src dst 65536)]
       [(src dst chunk)
-       (let loop ([total 0])
-         (let ([bv (io-stream-read src chunk)])
-           (if (eof-object? bv)
-               total
-               (begin
-                 (io-stream-write dst bv)
-                 (loop (+ total (bytevector-length bv)))))))]))
+       (let ([buf (make-bytevector chunk)])
+         (let loop ([total 0])
+           (let ([n (io-stream-read! src buf 0 chunk)])
+             (if (eof-object? n)
+                 total
+                 (begin
+                   (io-stream-write! dst buf 0 n)
+                   (loop (+ total n)))))))]))
 
   (define (io-stream-write-queue-size stream) (stream-write-queue-size stream))
 

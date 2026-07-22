@@ -28,6 +28,7 @@
     io-sleep
     ;; 文件系统
     io-open io-read io-write io-close
+    io-read! io-write!                       ; pinned 零拷贝
     O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_APPEND
     io-mkdir io-rmdir io-unlink io-rename io-realpath io-scandir
     io-stat io-exists?
@@ -40,6 +41,7 @@
     io-dns-resolve io-dns-resolve-all
     io-tcp-connect io-tcp-listen io-tcp-accept
     io-stream-read io-stream-write io-stream-close
+    io-stream-read! io-stream-write!         ; pinned 零拷贝
     io-stream-pipe io-stream-write-queue-size io-listener-close
     ;; 子进程
     io-spawn io-proc-wait io-proc-kill io-proc-close

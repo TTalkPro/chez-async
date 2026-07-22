@@ -38,6 +38,9 @@
     submit-tcp-connect submit-tcp-listen submit-tcp-accept
     submit-stream-read submit-stream-write submit-stream-close
     submit-listener-close
+    ;; pinned 零拷贝提交（bytevector 直传，锁到 task-free）
+    submit-fs-read-pinned submit-fs-write-pinned
+    submit-stream-read-pinned submit-stream-write-pinned
     submit-dns-resolve
     submit-spawn submit-proc-wait submit-proc-kill submit-proc-close
     proc-stdin proc-stdout proc-stderr
@@ -116,6 +119,12 @@
   (define %stream-wqsize (foreign-procedure "rt_stream_write_queue_size" (uptr) unsigned-64))
   (define %stream-close (foreign-procedure "rt_stream_close" (uptr uptr) uptr))
   (define %listener-close (foreign-procedure "rt_listener_close" (uptr uptr) uptr))
+
+  ;; pinned 零拷贝：bytevector 作 scheme-object 直传，C 侧 Slock_object 锁住
+  (define %fs-read-pinned (foreign-procedure "rt_fs_read_pinned" (int scheme-object unsigned-32 unsigned-32 integer-64 uptr) uptr))
+  (define %fs-write-pinned (foreign-procedure "rt_fs_write_pinned" (int scheme-object unsigned-32 unsigned-32 integer-64 uptr) uptr))
+  (define %stream-read-pinned (foreign-procedure "rt_stream_read_pinned" (uptr scheme-object unsigned-32 unsigned-32 uptr) uptr))
+  (define %stream-write-pinned (foreign-procedure "rt_stream_write_pinned" (uptr scheme-object unsigned-32 unsigned-32 uptr) uptr))
 
   (define %dns-resolve (foreign-procedure "rt_dns_resolve" (string string int uptr) uptr))
 
@@ -254,6 +263,16 @@
   (define (submit-stream-close stream) (%stream-close stream (current-cq)))
   (define (submit-listener-close listener) (%listener-close listener (current-cq)))
   (define (stream-write-queue-size stream) (%stream-wqsize stream))
+
+  ;; pinned：bytevector 直传（锁到 task-free）。bv 必须存活至 task-free。
+  (define (submit-fs-read-pinned fd bv start nbytes offset)
+    (%fs-read-pinned fd bv start nbytes offset (current-cq)))
+  (define (submit-fs-write-pinned fd bv start nbytes offset)
+    (%fs-write-pinned fd bv start nbytes offset (current-cq)))
+  (define (submit-stream-read-pinned stream bv start nbytes)
+    (%stream-read-pinned stream bv start nbytes (current-cq)))
+  (define (submit-stream-write-pinned stream bv start nbytes)
+    (%stream-write-pinned stream bv start nbytes (current-cq)))
 
   (define submit-dns-resolve
     (case-lambda
