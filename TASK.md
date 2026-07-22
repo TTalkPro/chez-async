@@ -340,6 +340,25 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
       注：符号命名用户定 `rt_` 前缀；vendor 方式用户定直接 copy。运行时加载需
       `LD_LIBRARY_PATH=native/build`（S6 再定安装路径）。
 
+## S-1.5. bake 构建集成（用户要求：S2 前先立起来）
+
+- [x] S1.5. **已完成。** `recipe.ss`（bake 构建描述）：
+      - `(native-task 'runtime (dir "native/runtime") (build (cmake (targets
+        "chez-async-rt"))) (produces "chez-async-rt"))` —— cmake 后端 Model A
+        （纯 C ABI，不注入 Chez 头）。CMakeLists 加 `PREFIX ""`（产物无 lib
+        前缀）+ `install(TARGETS)` 规则，`cmake --install` 落到 bake 约定位置
+        **`native/runtime/native/ta6le/chez-async-rt.so`**（bake 校验落点通过）。
+      - `(library-task 'libs '(chez-async))` —— 编 umbrella + 全 import 闭包
+        为 .so（→ `_build/ta6le/`，含新 runtime.so/task.so 直到 chez-async.so，
+        零错误）。
+      - `(task 'build '(runtime libs))` 默认；`(task 'test '(runtime) → run-tests.sh)`。
+      验证：`bake`=build 全过；`bake runtime`/`bake libs`/`bake test`（27/27）
+      各自通过；gate `tests/scratch/rt-runtime-gate.ss` 对**落地的** .so
+      （`LD_LIBRARY_PATH=native/runtime/native/ta6le`）全通。
+      注：CMakeLists 移入 `native/runtime/`；`.so` soname 无 lib 前缀→Scheme 侧
+      `(load-shared-object "chez-async-rt.so")`。`native/build.sh` 为无 bake 时
+      的等价 cmake 后备。`_build/`、`native/runtime/{build,native}/` 已 gitignore。
+
 ## S-2. Scheme 绑定层
 
 - [ ] S2. `internal/io-runtime.ss`（对齐 skiff/task.ss）：`load-shared-object`

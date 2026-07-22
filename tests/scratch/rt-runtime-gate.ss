@@ -3,7 +3,7 @@
 ;;; 运行:LD_LIBRARY_PATH=native/build scheme --script tests/scratch/rt-runtime-gate.ss
 
 (import (chezscheme))
-(load-shared-object "libchez-async-rt.so")
+(load-shared-object "chez-async-rt.so")   ; bake soname 无 lib 前缀
 
 ;; --- C ABI 绑定（rt_ 前缀）---
 (define rt-start (foreign-procedure "rt_runtime_start" () void))

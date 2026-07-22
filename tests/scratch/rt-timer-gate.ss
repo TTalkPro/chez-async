@@ -11,7 +11,7 @@
 (import (chezscheme))
 
 ;; 加载 C++ 运行时 .so（chez-async 宿主模型:Chez 当宿主,load 独立 .so）
-(load-shared-object "libchez-async-rt.so")
+(load-shared-object "chez-async-rt.so")
 
 ;; --- C ABI 绑定（对齐 skiff/task.ss 的形状）---
 (define rt-start (foreign-procedure "rt_runtime_start" () void))
