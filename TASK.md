@@ -413,10 +413,22 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
 
 ## S-4. 协程调度器集成
 
-- [ ] S4. `internal/scheduler` 的 suspend/resume 改 keyed-on-task-handle；
-      async 上下文把 `await-hook` 重绑为 suspend 协程 + 挂 task 到调度器 cq、
-      `current-cq` 重绑为调度器 cq；一个调度器线程 `%cq-wait` 收割 resume。
-      对齐 skiff async 的 cq-as-scheduler-substrate。
+- [x] S4. **已完成。** `high-level/io-async.ss`——自包含 cq 驱动协程调度器
+      （不动 internal/scheduler，护住 27 套件）。对齐 skiff async 的
+      cq-as-scheduler-substrate：
+      - 重绑 io-runtime 的 `await-hook`（协程 await task 时挂 task→协程 到
+        pending 表 + 逃逸调度器，不阻塞线程）+ `current-cq`（路由到调度器 cq）。
+      - 单线程 fiber 循环：有可运行协程就跑；否则 `completion-queue-wait` 阻塞
+        收割完成 task → resume 对应协程（传回 task-result）。
+      - 续延纪律照搬 internal/scheduler（27 测试验证过）：每轮 call/cc 重捕
+        scheduler-k，协程经当前 scheduler-k 逃逸，完成则正常返回；逃逸严格在
+        Scheme 栈上（cq-wait 返回后才 invoke 续延，不跨 C 栈）。
+      - API：`io-run-async`（跑根协程返回值/传播异常）、`io-spawn-async`（并发
+        子协程）、`in-io-async?`。
+      验证 `tests/scratch/io-async-gate.ss`：返回值、in-io-async? 谓词、**并发
+      两个 100ms sleep 实测 100ms（非串行 200ms）**、fs 在协程内往返、根协程
+      异常传播、10 并发协程、零 task/cq 泄漏。**同一套阻塞写法 io-* 放进
+      io-run-async 即自动协程挂起**——不阻塞线程。27 套件仍绿。
 
 ## S-5. 收敛（此步才真正「放弃现在的设计」）
 
