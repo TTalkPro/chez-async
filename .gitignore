@@ -128,9 +128,13 @@ playground.ss
 Icon
 
 # C++ 运行时构建产物
-native/build/
 
 # bake 产物
 _build/
-native/runtime/build/
-native/runtime/native/
+
+# C++ 运行时构建产物
+/build/
+_build/
+# native landing（machine-type 子目录；源码在 native/runtime/）
+/native/*/
+!/native/runtime/
