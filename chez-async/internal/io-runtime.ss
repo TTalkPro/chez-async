@@ -54,6 +54,7 @@
     io-sleep
     ;; 错误条件
     &io-error make-io-error-condition io-error? io-error-errno io-error-name
+    raise-io-error   ; (who negative-errno) → 抛 &io-error
     ;; 泄漏断言（测试用）
     io-live-tasks io-live-cqs io-live-streams io-live-listeners
     io-live-processes io-live-watchers)
@@ -159,7 +160,7 @@
     (errno io-error-errno)        ; 负 libuv errno
     (name io-error-name))         ; 符号名字符串，如 "ENOENT"
 
-  (define (io-error who r)
+  (define (raise-io-error who r)
     (raise
       (condition
         (make-io-error-condition r (%err-name r))
@@ -204,7 +205,7 @@
   (define (task-run who t)
     (let ([r (task-await t)])
       (task-free t)
-      (if (< r 0) (io-error who r) r)))
+      (if (< r 0) (raise-io-error who r) r)))
 
   (define (task-run-void who t)
     (task-run who t)
@@ -214,7 +215,7 @@
   (define (task-run-str who t)
     (let ([r (task-await t)])
       (if (< r 0)
-          (begin (task-free t) (io-error who r))
+          (begin (task-free t) (raise-io-error who r))
           (let ([s (task-str-result t)])
             (task-free t)
             s))))

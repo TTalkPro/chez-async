@@ -387,11 +387,29 @@ Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产
 
 ## S-3. op 迁移（high-level 重建在 io-task 上，新旧并存）
 
-- [ ] S3. timer → fs-*（open/read/write/close/stat/mkdir/...）→ dns → tcp →
-      stream → process → watch，逐个把 high-level API 重建在 rt_ task 上。
-      buffer 走 foreign void* + 现有 bytevector↔foreign 拷贝。每迁一个增量测试，
-      旧路径与旧测试保持绿。stream/listener 直接移植 skiff net.hpp（含停泊队列/
-      背压），F5 高层逻辑退化为薄封装。
+- [x] S3. **已完成（timer/fs/dns/tcp/stream/process/watch 全覆盖）。** high-level
+      API 重建在 io-runtime 的 submit-*/task-run 上，buffer 走 foreign void* +
+      internal/foreign 的 bytevector↔foreign 桥接。**关键洞察**：rt_fs_write/
+      rt_stream_write/rt_spawn 在 submit 调用内**同步** memcpy 源→C++ task，故
+      submit 返回即可 free foreign 源（无挂起/泄漏）；读则 await 后分配 foreign
+      dst、read_into、转 bytevector。
+      - `high-level/io-fs.ss`：io-open/read/write/close、mkdir/rmdir/unlink/
+        rename/realpath/scandir、io-stat（stat-info 记录）、io-exists?、
+        io-read-file/write-file、io-watch/next/close（含 rename?/change? 谓词）。
+      - `high-level/io-net.ss`：io-dns-resolve/-all（family any/ipv4/ipv6）、
+        io-tcp-connect（解析多地址按序试）/listen/accept、io-stream-read/write/
+        close/pipe、io-listener-close。stream/listener 停泊队列/背压在 C++ 侧
+        （net.hpp），Scheme 侧仅 submit+await。
+      - `high-level/io-proc.ss`：io-spawn（inherit/capture stdio）、io-proc-wait/
+        kill/close、io-proc-stdin/out/err、io-run、io-run/output。argv/env NUL
+        打包→foreign。
+      - io-runtime 补导出 `raise-io-error`（供自定义流程区分 eof/error 抛错）。
+      验证（scratch，`LD_LIBRARY_PATH=native/ta6le`）：`io-fs-net-gate.ss`
+      （fs 整文件往返含 emoji、stat、目录 scandir、错误路径；dns；**完整 TCP
+      echo** server/client 分线程阻塞，零 stream/listener/task 泄漏）；
+      `io-proc-gate.ss`（io-run true/false、io-run/output 捕获 stdout、零泄漏）。
+      现有 27 套件仍绿（新模块未进 umbrella，零影响）。
+      注：多线程阻塞成立——每线程各自阻塞在其 task 的 C++ cv 上互不干扰。
 
 ## S-4. 协程调度器集成
 
