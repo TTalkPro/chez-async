@@ -293,3 +293,76 @@
 - [x] R14. `chez-async.ss` 导出 runtime + task 全部 API；README 增 runtime
       章节；known-issues.md 记录三条已接受差距（GC 耦合 / 回调 activate 开销
       / 无零拷贝，设计文档 §5）。27/27 全套件通过。
+
+---
+
+# 移植 skiff C++ 运行时 —— Task-based I/O substrate（2026-07-22，已定架构）
+
+设计文档：`docs/skiff-aligned-io-design.md`。
+**架构决策（经用户确认）**：移植 skiff 的 C++ task 运行时——把
+`skiff/src/runtime/{task.hpp,runtime.hpp,runtime.cpp,net.hpp}` + 裁剪的
+`ffi.cpp` adapt 进 chez-async（`native/runtime/`，符号前缀改 `rt_`），CMake/C++23
+构建为 `libchez-async-rt.so`，chez-async 的 I/O 经 FFI 重绑到其 C ABI。放弃纯 FFI
+方案（`runtime-thread-design.md` 的纯 Scheme 版将被取代）。
+**关键事实**：skiff 运行时内核（task.hpp/runtime.*/net.hpp）不 include scheme.h、
+只依赖 uv.h——纯 C++ 可干净抽成 .so。v1 丢 pinned 零拷贝、buffer ABI 收 foreign
+void*，runtime .so 零 Chez 头依赖。收益：消除纯 FFI 版三条差距（GC 耦合 / 回调进
+Scheme 开销 / 无零拷贝）。代价：从零构建变成带 CMake/C++23 产物（用户已接受）。
+工具链已确认齐备：g++14 -std=c++23、cmake 3.31、system libuv、Chez 10.4.1 scheme.h。
+约定沿用：不自动提交；Scheme 侧每步 `./run-tests.sh` 保持全绿。
+
+## S-0. 原型闸门（先做，最高风险的整条工具链先证）
+
+- [x] S0. **已通过。** 最小 task 运行时 `native/runtime/rt_mini.cpp`（忠实模仿
+      skiff task.hpp/runtime.cpp 的 Task/CompletionQueue/loop 线程/Submit/Drain/
+      Dispatch timer 路径,纯 C++/libuv,零 Chez 头）+ `native/CMakeLists.txt`
+      （C++23,pkg-config 找 system libuv,产 `libchez-async-rt.so`）+ 绑定验证
+      `tests/scratch/rt-timer-gate.ss`。三项全过：①Chez 加载 C++ .so,rt_timer→
+      rt_await 端到端(60ms 定时器 await 到 0)；②`__collect_safe` rt_await:一线程
+      阻塞 300ms await 时主线程重 GC 仅 2ms 完成(阻塞点从 uv_run 移到 C++ cv,
+      collect_safe 语义照样成立)；③CompletionQueue 收割 15 个 timer 不重不漏。
+      **整条工具链(g++14 -std=c++23 编 .so + Chez load-shared-object + collect_safe
+      await + cq)成立,S1 可继续。**
+
+## S-1. 构建骨架 + vendor
+
+- [ ] S1. `native/` CMake/C++23 工程，vendor skiff task.hpp/runtime.*/net.hpp +
+      裁剪的 `rt_ffi.cpp`（砍 http/http2/ws/tls/pinned/内嵌 Chez；符号 rt_ 前缀），
+      链 system libuv，产 `libchez-async-rt.so`。注明来源 skiff commit。
+      run-tests.sh / 构建脚本集成（.so 就位后才跑 Scheme 测试）。
+
+## S-2. Scheme 绑定层
+
+- [ ] S2. `internal/io-runtime.ss`（对齐 skiff/task.ss）：`load-shared-object`
+      + 全量 C ABI `foreign-procedure` 绑定；`%await`/`%cq-wait` 声明
+      `__collect_safe`；`task-run`/`task-run-void`/`task-run-str` helper；
+      `&io-error`（负 errno + 符号名）；`await-hook`/`current-cq` thread-parameter
+      集成缝（默认阻塞 await）。
+
+## S-3. op 迁移（high-level 重建在 io-task 上，新旧并存）
+
+- [ ] S3. timer → fs-*（open/read/write/close/stat/mkdir/...）→ dns → tcp →
+      stream → process → watch，逐个把 high-level API 重建在 rt_ task 上。
+      buffer 走 foreign void* + 现有 bytevector↔foreign 拷贝。每迁一个增量测试，
+      旧路径与旧测试保持绿。stream/listener 直接移植 skiff net.hpp（含停泊队列/
+      背压），F5 高层逻辑退化为薄封装。
+
+## S-4. 协程调度器集成
+
+- [ ] S4. `internal/scheduler` 的 suspend/resume 改 keyed-on-task-handle；
+      async 上下文把 `await-hook` 重绑为 suspend 协程 + 挂 task 到调度器 cq、
+      `current-cq` 重绑为调度器 cq；一个调度器线程 `%cq-wait` 收割 resume。
+      对齐 skiff async 的 cq-as-scheduler-substrate。
+
+## S-5. 收敛（此步才真正「放弃现在的设计」）
+
+- [ ] S5. async/await、async-combinators、high-level stream 全部落到 io-task；
+      删除弃用的纯 Scheme low-level uv 绑定层与 promise-per-op 路径；更新全部
+      测试。`make-promise` 保留给纯计算/组合器。
+
+## S-6. 零拷贝 / bake / 文档
+
+- [ ] S6. v2 pinned 零拷贝（需 stock scheme 导出 Slock_object 给 .so，或
+      Sforeign_symbol 反向）；bake recipe（可选，与 CMake 并存）；README/
+      known-issues 更新；迁移说明（旧 low-level API → io-task）；可移植性
+      （runtime .so 跨平台 libuv 链接）。

@@ -126,3 +126,6 @@ playground.ss
 .AppleDouble
 .LSOverride
 Icon
+
+# C++ 运行时构建产物
+native/build/
