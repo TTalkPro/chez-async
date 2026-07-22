@@ -58,8 +58,15 @@
   ;; 示例：
   ;;   (define-ffi %ffi-uv-loop-init "uv_loop_init" (void*) int)
 
+  ;; 可选首标志 collect-safe：展开为 `(foreign-procedure __collect_safe ...)`，
+  ;; 用于会阻塞的 libuv 调用（如 uv_run 睡进 epoll）。声明后调用期间当前线程
+  ;; deactivate，别的线程可独立 GC；返回时重新 activate。仅用于不传 Scheme 堆
+  ;; 对象、且可能长时间阻塞的绑定。参见 tests/scratch/collect-safe-verify.ss。
   (define-syntax define-ffi
-    (syntax-rules ()
+    (syntax-rules (collect-safe)
+      [(_ collect-safe name c-name arg-types return-type)
+       (define name
+         (foreign-procedure __collect_safe c-name arg-types return-type))]
       [(_ name c-name arg-types return-type)
        (define name
          (foreign-procedure c-name arg-types return-type))]
@@ -200,11 +207,13 @@
   ;; 用法：
   ;;   (define-c-callback name signature scheme-proc)
 
+  ;; __collect_safe：与 ffi/callbacks.ss 一致——回调在 __collect_safe 的
+  ;; uv_run（可能 deactivated 的线程）内触发，入口须 activate 当前线程。
   (define-syntax define-c-callback
     (syntax-rules ()
       [(_ name signature scheme-proc)
        (define name
-         (foreign-callable scheme-proc signature void))]))
+         (foreign-callable __collect_safe scheme-proc signature void))]))
 
   ;; define-registered-callback: 定义并注册到统一注册表的回调
   ;;

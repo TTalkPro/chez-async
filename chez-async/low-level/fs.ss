@@ -113,7 +113,7 @@
   ;; 通用 FS 回调：处理大多数文件系统操作
   (define-registered-callback get-fs-callback CALLBACK-FS
     (lambda ()
-      (foreign-callable
+      (foreign-callable __collect_safe
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
@@ -132,7 +132,7 @@
   ;; stat 回调：处理文件状态查询
   (define-registered-callback get-fs-stat-callback CALLBACK-FS-STAT
     (lambda ()
-      (foreign-callable
+      (foreign-callable __collect_safe
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
@@ -155,7 +155,7 @@
   ;; scandir 回调：处理目录扫描
   (define-registered-callback get-fs-scandir-callback CALLBACK-FS-SCANDIR
     (lambda ()
-      (foreign-callable
+      (foreign-callable __collect_safe
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
@@ -176,7 +176,7 @@
   ;; readlink 回调：处理符号链接读取
   (define-registered-callback get-fs-readlink-callback CALLBACK-FS-READLINK
     (lambda ()
-      (foreign-callable
+      (foreign-callable __collect_safe
         (lambda (req-ptr)
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])

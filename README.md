@@ -165,6 +165,38 @@
 - 定时器
 - Pipe/TTY
 
+### 🛥️ 后台 Runtime 线程（Task-based，skiff 同构）
+
+把事件循环放到一个专属的后台线程（`fork-thread`），主线程从 `uv-run` 中解放出来。
+任意线程提交任务、需要结果时再阻塞等待——skiff `skiff_runtime_start` /
+`skiff_submit_task` 的纯 FFI 同构实现，零 C 代码。详见
+[`docs/runtime-thread-design.md`](docs/runtime-thread-design.md)。
+
+```scheme
+(import (chez-async))
+
+(define rt (make-runtime))
+(runtime-start! rt)                       ; fork 后台事件循环线程
+
+;; 提交一个「同步写法」的异步任务；主线程此刻自由
+(define task
+  (runtime-submit! rt
+    (lambda ()
+      ;; I/O 建在 runtime 自己的 loop 上（(runtime-loop rt)）
+      (let ([loop (runtime-loop rt)])
+        (await (make-promise loop
+                 (lambda (resolve _)
+                   (run-after loop 100 (lambda () (resolve 'done))))))))))
+
+(runtime-await task)                       ; 需要结果了，阻塞取回：'done
+(runtime-stop! rt)                          ; 排干在途任务后 join
+```
+
+Task / CompletionQueue 层（`task-submit!` / `task-await` / `cq-wait-one` …）提供
+显式 task 句柄与批量收割，与 skiff 的 `Task` / `CompletionQueue` 字段级对应。
+
+前置：线程版 Chez（`__collect_safe` + `fork-thread`）。`runtime-start!` 会检查。
+
 ---
 
 ## 项目状态

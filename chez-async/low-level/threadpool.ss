@@ -38,6 +38,7 @@
   (import (chezscheme)
           (chez-async ffi async)
           (chez-async ffi errors)
+          (chez-async internal thread-queue)
           (chez-async low-level async)
           (chez-async low-level handle-base))
 
@@ -60,13 +61,8 @@
       (immutable success?)        ; #t = 成功, #f = 失败
       (immutable value)))         ; 结果值或错误对象
 
-  ;; 任务队列记录类型（双列表 FIFO，O(1) amortized push/pop）
-  (define-record-type (task-queue make-task-queue-record task-queue?)
-    (fields
-      (mutable out)               ; 出队端（正序）
-      (mutable in)                ; 入队端（逆序）
-      (immutable mutex)           ; Mutex for thread safety
-      (immutable not-empty)))     ; Condition variable
+  ;; 任务/结果队列改用 internal/thread-queue 的通用线程安全 FIFO
+  ;; （原双列表 FIFO 已提炼到该模块，与 runtime 共用）。
 
   ;; 线程池记录类型
   (define-record-type (threadpool make-threadpool-record threadpool?)
@@ -85,59 +81,13 @@
       (immutable all-done-cond))) ; 所有工作线程退出后 broadcast
 
   ;; ========================================
-  ;; 队列操作
+  ;; 队列操作（薄封装到 internal/thread-queue）
   ;; ========================================
 
-  (define (make-task-queue)
-    "创建新的任务队列"
-    (make-task-queue-record
-      '()                         ; out
-      '()                         ; in
-      (make-mutex)                ; mutex
-      (make-condition)))          ; not-empty
-
-  (define (task-queue-empty? q)
-    "检查队列是否为空（调用方需持有 mutex）"
-    (and (null? (task-queue-out q))
-         (null? (task-queue-in q))))
-
-  (define (queue-push! q item)
-    "添加项到队列（线程安全）— O(1)"
-    (with-mutex (task-queue-mutex q)
-      (task-queue-in-set! q (cons item (task-queue-in q)))
-      (condition-signal (task-queue-not-empty q))))
-
-  (define (task-queue-pop-internal! q)
-    "内部 pop（调用方需持有 mutex）— O(1) amortized"
-    (when (null? (task-queue-out q))
-      (task-queue-out-set! q (reverse (task-queue-in q)))
-      (task-queue-in-set! q '()))
-    (let ([item (car (task-queue-out q))])
-      (task-queue-out-set! q (cdr (task-queue-out q)))
-      item))
-
-  (define (queue-pop! q running?)
-    "从队列获取项，阻塞直到有任务或 running? 返回 #f
-     running?: (lambda () bool) — 返回 #f 时退出等待，函数返回 #f"
-    (with-mutex (task-queue-mutex q)
-      (let loop ()
-        (cond
-          [(not (running?)) #f]
-          [(not (task-queue-empty? q))
-           (task-queue-pop-internal! q)]
-          [else
-           (condition-wait (task-queue-not-empty q)
-                           (task-queue-mutex q))
-           (loop)]))))
-
-  (define (queue-pop-all! q)
-    "获取并清空队列中的所有项"
-    (with-mutex (task-queue-mutex q)
-      (let ([out (task-queue-out q)]
-            [in (task-queue-in q)])
-        (task-queue-out-set! q '())
-        (task-queue-in-set! q '())
-        (append out (reverse in)))))
+  (define make-task-queue make-thread-queue)
+  (define queue-push! tq-push!)
+  (define queue-pop! tq-blocking-pop!)   ; (q running?) — running? 即 continue?
+  (define queue-pop-all! tq-pop-all!)
 
   ;; ========================================
   ;; 工作线程
@@ -277,8 +227,8 @@
         ;; 1. 设置关闭标志
         (threadpool-running?-set! pool #f)
         ;; 2. 唤醒所有阻塞在 queue-pop! 中的工作线程
-        (with-mutex (task-queue-mutex (threadpool-task-queue pool))
-          (condition-broadcast (task-queue-not-empty (threadpool-task-queue pool))))
+        (with-mutex (tq-mutex (threadpool-task-queue pool))
+          (condition-broadcast (tq-condition (threadpool-task-queue pool))))
         ;; 3. 等待所有工作线程退出（condition-wait 会原子释放 shutdown-mutex）
         (let wait ()
           (when (> (threadpool-active-workers pool) 0)

@@ -85,6 +85,8 @@ run_test "Scheduler Integ"     tests/test-scheduler-integration.ss
 run_test "Promise Semantics"   tests/test-promise-semantics.ss
 run_test "Regression"          tests/test-regression.ss
 run_test "Phase 3 Integration" tests/test-phase3-integration.ss "$TIMEOUT_LONG"
+run_test "Runtime Thread"      tests/test-runtime.ss
+run_test "Task / CQ"           tests/test-task.ss
 
 TOTAL=$((PASSED + FAILED))
 

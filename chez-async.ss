@@ -130,6 +130,38 @@
     operation-cancelled?
     async-cancellable
     link-tokens
+
+    ;; ========================================
+    ;; 后台 runtime 线程 + Task 化
+    ;; ========================================
+    make-runtime
+    runtime?
+    runtime-start!
+    runtime-stop!
+    runtime-running?
+    runtime-loop
+    runtime-submit!
+    runtime-await
+    runtime-poll
+    runtime-on-thread?
+    &runtime-error runtime-error?
+    &runtime-stopped runtime-stopped-error?
+    make-runtime-stopped-error
+    ;; Task / CompletionQueue 层
+    task-submit!
+    task?
+    task-id
+    task-op
+    task-runtime
+    task-await
+    task-poll
+    task-cancel!
+    task-cancelled?
+    task-current-token
+    make-completion-queue
+    completion-queue?
+    cq-wait-one
+    cq-try-pop
     )
   (import
     (only (chez-async ffi errors)
@@ -141,6 +173,14 @@
     (chez-async high-level async-combinators)
     (chez-async high-level stream)
     (chez-async high-level async-work)
-    (chez-async high-level cancellation))
+    (chez-async high-level cancellation)
+    (only (chez-async high-level runtime)
+          make-runtime runtime? runtime-start! runtime-stop!
+          runtime-running? runtime-loop runtime-submit! runtime-await
+          runtime-poll runtime-on-thread?
+          &runtime-error runtime-error?
+          &runtime-stopped runtime-stopped-error?
+          make-runtime-stopped-error)
+    (chez-async high-level task))
 
 ) ; end library

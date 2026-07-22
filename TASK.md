@@ -203,3 +203,93 @@
 - [x] H5. `ffi/tcp.ss` 冗余的 `%ffi-uv-tcp-listen` 已删除（定义 + export；
       监听统一用 stream.ss 的 `%ffi-uv-listen`）。
 - [x] H6. `threadpool-submit!` 已补线程安全约束文档（只能主线程调用）。
+
+---
+
+# Runtime 线程与 Task 化（2026-07-22 设计轮）
+
+设计文档：`docs/runtime-thread-design.md`（skiff 同构：runtime 线程 +
+提交队列 + Task/CompletionQueue，纯 FFI，零 C 代码）。
+前置条件：线程版 Chez ≥ 9.5.2（`__collect_safe`）；`runtime-start!` 入口用
+`(threaded?)` 检查并给出明确报错。
+约定沿用：改动不自动 git 提交；每步跑 `./run-tests.sh` 保持全绿。
+
+## R-0. 前置验证（先做，风险最高的假设先证伪）
+
+- [x] R1. `__collect_safe` 最小验证程序 —— 已完成，决定性通过
+      （`tests/scratch/collect-safe-verify.ss`，Chez 10.4.1 线程版）。四场景：
+      - **A** 正向功能：fork-thread 经 `__collect_safe` uv_run 深睡 epoll，
+        `__collect_safe` 定时器回调分配 Scheme 堆对象并计算，主线程并发 GC
+        压力（2000×分配 + 显式 collect）→ 回调 20 次值全对、uv_run 干净返回。
+      - **A2** 计时证明：runtime 线程单挂 300ms 定时器深睡，主线程重 GC 仅
+        **2ms** 完成（远小于 300ms）→ GC 未被 epoll 阻塞。
+      - **A3** 反向对照（决定性）：去掉 `__collect_safe`，主线程 `(collect)`
+        直接抛 **“cannot collect when multiple threads are active”** —— 证明
+        activated 的 epoll 深睡下 GC 根本无法运行，`__collect_safe` 是必要而
+        非可选。
+      - **B** 同线程路径：主线程 activated 状态经 uv_run 'nowait 反复进入同一
+        collect-safe 回调，嵌套 activate 幂等、值全对。
+      结论：R2/R3 全局 collect-safe 化的两个前提（deactivated 线程回调安全、
+      activated 线程嵌套安全）均成立，方案 A 可继续。
+
+## R-A. 方案 A：runtime 线程（现有 API 全部不动）
+
+- [x] R2. `internal/macros.ss` `define-ffi` 加可选首标志 `collect-safe`
+      （展开为 `foreign-procedure __collect_safe`）；`ffi/core.ss` `%ffi-uv-run`
+      改用。全局生效不分模式。25/25 通过。
+- [x] R3. 所有 foreign-callable 站点统一 `__collect_safe`：`ffi/callbacks.ss`
+      10 处、`low-level/{fs,dns,process}.ss` 7 处、`internal/macros.ss`
+      `define-c-callback`。回调实例由 callbacks/low-level 工厂创建（registry
+      只缓存），故改在工厂站点。25/25 通过，同线程模式零行为变化。
+- [x] R4. 提炼 `internal/thread-queue.ss`：双列表 FIFO + mutex + condition
+      （`tq-push!` / `tq-pop-all!` / `tq-blocking-pop!` / `tq-try-pop!` +
+      `tq-mutex`/`tq-condition` 供外部 broadcast）。threadpool 的
+      task-queue/result-queue 改为复用（薄 alias），删掉自带的 task-queue
+      记录类型与 5 个队列函数。25/25 通过，行为不变。
+- [x] R5. `high-level/runtime.ss` 核心：runtime 记录（专属 loop、线程、
+      提交队列、unref'd 提交 async 句柄、submit-mutex/stopped?/drain?、
+      done-cond）；`runtime-start!`（`(threaded?)` 检查 + fork 线程并等其
+      记录 thread-id）；外层循环 = `drain-submit-queue!` → `drive-loop 'default`
+      → 停机收尾 / 静止 `tq-blocking-pop!` 等待。导入布局无 F1 式 fork-thread
+      初始化死锁（冒烟 + 全套件验证通过）。
+- [x] R6. `runtime-submit!` / `runtime-submit-cell!`（submit-mutex 内检查
+      stopped? 再 push，杜绝孤儿 cell；tq-push! signal condition 通道 +
+      `uv-async-send!` uv_run 通道，双通道唤醒）与 `runtime-await`
+      （result-cell：mutex+cond+done?/ok?/value；失败 re-raise 原异常对象）。
+      提交 async 回调只 `drain-submit-queue!`→spawn，不执行闭包（F1 硬约束）；
+      协程内 await 因此合法。`runtime-poll` 三态。冒烟见
+      `tests/scratch/runtime-{smoke,await-io}.ss`（await-io 证实后台线程上
+      同步写法异步 I/O + 主线程自由 + 异常跨线程传播）。
+- [x] R7. 生命周期：`runtime-stop!`（`'drain? #t` 默认排干未启动提交；
+      `'drain? #f` 未启动项以 `&runtime-stopped` 失败；两者都等已 spawn 协程
+      跑完，不中途丢在途 libuv 操作）→ `finish-shutdown!`：close 提交句柄 →
+      nowait flush close 回调 → `uv-loop-close`（A6 次序）→ signal join。
+      stopped? 与提交 push 同 submit-mutex 串行化，stop 后 submit 抛
+      `&runtime-stopped`。
+- [~] R8. 线程归属断言：机制已具备（`runtime-on-thread?` 谓词 +
+      记录 thread-id）。**全面插桩每个高层 API 入口暂缓**——跨 low-level/
+      high-level 铺断言与收益不成比例，留作后续按需添加。
+- [x] R9. `tests/test-runtime.ss`（11 例）：start/stop、await 值、主线程
+      自由（timer 期间算 fib 不阻塞）、异常跨线程、poll 三态、串行 await I/O、
+      4 线程并发 submit、drain 停机全完成、非 drain 停机无 cell 悬挂、停机后
+      submit 被拒、无句柄泄漏（停机后可再起新 runtime）。登记 run-tests.sh。
+- [x] R10. `examples/runtime-demo.ss`：主线程算 fib 与后台 I/O 并行、并发提交
+      收集结果、异常跨线程传播、drain 停机。
+
+## R-B. 方案 B：Task / CompletionQueue 层（A 之上的 API 皮）
+
+- [x] R11. `high-level/task.ss`：task 记录（id、op 符号、内嵌 result-cell、
+      所属 runtime、可选 cq、cancel-source）+ completion-queue（复用
+      thread-queue）：`task-submit!`（关键字 `'op` / `'cq`）/ `task-await` /
+      `task-poll` / `make-completion-queue` / `cq-wait-one` / `cq-try-pop`。
+      完成钩子经 runtime 新增的 `runtime-submit-cell!` on-complete 参数
+      （settle 后在 runtime 线程 `cq-post!`，对应 skiff `Task::Complete`）。
+- [x] R12. `tests/test-task.ss`（6 例）：task-await 值、op 标签、poll 三态、
+      **N=20 task 汇入单 cq 收割不重不漏**、task-cancel!、cq-try-pop 非阻塞。
+- [x] R13. `task-cancel!`：每 task 内置 F3 cancel-source；token 经
+      `task-current-token` 参数在 thunk 内可取（thunk 保持零参），
+      thunk 用 `(await (async-cancellable (task-current-token) p))` 包装
+      即可被取消。语义与 F3 一致（reject 包装，不做 uv_cancel 真中止）。
+- [x] R14. `chez-async.ss` 导出 runtime + task 全部 API；README 增 runtime
+      章节；known-issues.md 记录三条已接受差距（GC 耦合 / 回调 activate 开销
+      / 无零拷贝，设计文档 §5）。27/27 全套件通过。

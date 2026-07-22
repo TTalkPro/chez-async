@@ -56,7 +56,14 @@
   ;;   UV_RUN_DEFAULT (0) - 运行直到没有活动句柄
   ;;   UV_RUN_ONCE (1)    - 处理一个事件后返回
   ;;   UV_RUN_NOWAIT (2)  - 非阻塞检查
-  (define-ffi %ffi-uv-run "uv_run" (void* int) int)
+  ;;
+  ;; collect-safe：uv_run 会睡进 epoll 阻塞，声明为 __collect_safe 让调用线程
+  ;; 在此期间 deactivate，别的线程（runtime 模式的主线程、threadpool 工作线程）
+  ;; 可独立发起 GC 而不被阻塞。仅传 void*/int，无 Scheme 堆对象跨边界。
+  ;; libuv 在此期间触发的所有 foreign-callable 完成回调也必须 __collect_safe
+  ;; （见 ffi/callbacks.ss），因为回调在 deactivated 线程上进入 Scheme。
+  ;; 验证见 tests/scratch/collect-safe-verify.ss（R1）。
+  (define-ffi collect-safe %ffi-uv-run "uv_run" (void* int) int)
 
   ;; void uv_stop(uv_loop_t* loop)
   ;; 停止事件循环

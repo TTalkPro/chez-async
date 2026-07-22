@@ -149,7 +149,7 @@
       ;; 单个句柄指针参数 (timer, close, idle, prepare, check, etc.)
       ;; 使用 per-loop 注册表
       [((void*))
-       (foreign-callable
+       (foreign-callable __collect_safe
          (lambda (handle-ptr)
            (guard (e [else (handle-callback-error e)])
              (let ([wrapper (ptr->wrapper handle-ptr)])
@@ -159,7 +159,7 @@
       ;; 请求指针 + 状态码 (write, connect, shutdown, etc.)
       ;; 使用请求全局注册表
       [((void* int request))
-       (foreign-callable
+       (foreign-callable __collect_safe
          (lambda (req-ptr status)
            (guard (e [else (handle-callback-error e)])
              (let ([wrapper (request-ptr->wrapper req-ptr)])
@@ -169,7 +169,7 @@
       ;; 流读取回调 (stream, tty, pipe, tcp, etc.)
       ;; 使用 per-loop 注册表
       [((void* ssize_t void*))
-       (foreign-callable
+       (foreign-callable __collect_safe
          (lambda (stream-ptr nread buf-ptr)
            (guard (e [else (handle-callback-error e)])
              (let ([wrapper (ptr->wrapper stream-ptr)])
@@ -179,7 +179,7 @@
       ;; 连接监听回调 (listen callback on server handle)
       ;; 使用 per-loop 注册表
       [((void* int connection))
-       (foreign-callable
+       (foreign-callable __collect_safe
          (lambda (server-ptr status)
            (guard (e [else (handle-callback-error e)])
              (let ([wrapper (ptr->wrapper server-ptr)])
@@ -205,7 +205,7 @@
   (define (make-alloc-callback scheme-proc)
     "创建内存分配回调
      scheme-proc: 回调过程 (lambda (wrapper suggested-size buf-ptr) ...)"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr suggested-size buf-ptr)
         ;; 先置空 buf：wrapper 查找失败或分配异常时 libuv 拿到
         ;; base=NULL/len=0（按 UV_ENOBUFS 处理），而不是未初始化的栈垃圾
@@ -269,7 +269,7 @@
   (define (make-udp-recv-callback scheme-proc)
     "创建 UDP 接收回调
      scheme-proc: 回调过程 (lambda (wrapper nread buf-ptr addr-ptr flags) ...)"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr nread buf-ptr addr-ptr flags)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)])
@@ -280,7 +280,7 @@
   (define (make-signal-callback scheme-proc)
     "创建信号处理回调
      scheme-proc: 回调过程 (lambda (wrapper signum) ...)"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr signum)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)])
@@ -291,7 +291,7 @@
   (define (make-poll-callback scheme-proc)
     "创建轮询回调
      scheme-proc: 回调过程 (lambda (wrapper status events) ...)"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr status events)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)])
@@ -304,7 +304,7 @@
   (define (make-fs-event-callback scheme-proc)
     "创建文件系统事件回调
      scheme-proc: 回调过程 (lambda (wrapper filename events status) ...)"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr filename-ptr events status)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)]
@@ -321,7 +321,7 @@
   (define (make-fs-poll-callback scheme-proc)
     "创建文件系统轮询回调
      scheme-proc: 回调过程 (lambda (wrapper status prev-stat-ptr curr-stat-ptr) ...)"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr status prev-stat-ptr curr-stat-ptr)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)])

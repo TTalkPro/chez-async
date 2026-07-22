@@ -78,7 +78,7 @@
        foreign-callable 对象
 
      注意：返回的 foreign-callable 由 callback-registry 管理，无需额外 GC 保护。"
-    (foreign-callable
+    (foreign-callable __collect_safe
       (lambda (handle-ptr exit-status term-signal)
         (guard (e [else (handle-callback-error e)])
           (let ([wrapper (ptr->wrapper handle-ptr)])

@@ -46,7 +46,7 @@
   ;; 注意：使用 request-ptr->wrapper 因为这是请求回调
   (define-registered-callback get-getaddrinfo-callback CALLBACK-GETADDRINFO
     (lambda ()
-      (foreign-callable
+      (foreign-callable __collect_safe
         (lambda (req-ptr status addrinfo-ptr)
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
@@ -70,7 +70,7 @@
   ;; 注意：使用 request-ptr->wrapper 因为这是请求回调
   (define-registered-callback get-getnameinfo-callback CALLBACK-GETNAMEINFO
     (lambda ()
-      (foreign-callable
+      (foreign-callable __collect_safe
         (lambda (req-ptr status hostname-ptr service-ptr)
           (guard (e [else (handle-callback-error e)])
             (let ([wrapper (request-ptr->wrapper req-ptr)])
